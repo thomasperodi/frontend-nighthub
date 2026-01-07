@@ -1,4 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
+import React from "react";
 import { StyleSheet } from "react-native";
 
 export default function GradientBackground({ children }: { children: React.ReactNode }) {
