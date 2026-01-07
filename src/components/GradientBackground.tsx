@@ -5,10 +5,11 @@ import { StyleSheet } from "react-native";
 export default function GradientBackground({ children }: { children: React.ReactNode }) {
   return (
     <LinearGradient
-      colors={["#2B1055", "#4B1D9C"]}
+      colors={["#47c74dff", "#4B1D9C"]}
       style={styles.container}
     >
-      {children}
+      {children }
+      
     </LinearGradient>
   );
 }
