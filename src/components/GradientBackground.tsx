@@ -1,0 +1,19 @@
+import { LinearGradient } from "expo-linear-gradient";
+import { StyleSheet } from "react-native";
+
+export default function GradientBackground({ children }: { children: React.ReactNode }) {
+  return (
+    <LinearGradient
+      colors={["#2B1055", "#4B1D9C"]}
+      style={styles.container}
+    >
+      {children}
+    </LinearGradient>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+});
