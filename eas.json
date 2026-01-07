@@ -6,8 +6,7 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "installCommand": "npm install"
+      "distribution": "internal"
     },
     "preview": {
       "distribution": "internal"
