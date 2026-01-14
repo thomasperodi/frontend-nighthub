@@ -1,21 +1,43 @@
-import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import React from 'react';
+import { View, ActivityIndicator } from 'react-native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useAuth } from '../providers/AuthProvider';
 
-import LoginScreen from "../screens/auth/LoginScreen";
-import SelectRoleScreen from "../screens/auth/SelectRoleScreen";
-import VenueHomeScreen from "../screens/venue/VenueHomeScreen";
-import ClientHomeScreen from "../screens/client/ClientHomeScreen";
-import OnboardingScreen from "../screens/onboarding/OnboardingScreen";
+import LoginScreen from '../screens/auth/LoginScreen';
+import OnboardingScreen from '../screens/onboarding/OnboardingScreen';
+
+import VenueStack from './stacks/VenueStack';
+import ClientStack from './stacks/ClientStack';
+import StaffStack from './stacks/StaffStack';
 
 const Stack = createNativeStackNavigator();
 
 export default function RootNavigator() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-<Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="SelectRole" component={SelectRoleScreen} />
-      <Stack.Screen name="VenueHome" component={VenueHomeScreen} />
-      <Stack.Screen name="ClientHome" component={ClientHomeScreen} />
-    </Stack.Navigator>
-  );
+  const { user, loading } = useAuth();
+
+  // While restoring token, show a small native loader
+  if (loading)
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+
+  // If not authenticated, show auth stack
+  if (!user) {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        <Stack.Screen name="Login" component={LoginScreen} />
+      </Stack.Navigator>
+    );
+  }
+
+  // Authenticated — render role-specific stack directly (clean, explicit)
+  const role = (user.role || '').toLowerCase();
+
+  if (role === 'venue') return <VenueStack />;
+  if (role === 'staff') return <StaffStack />;
+  // default to client for 'user' or unknown roles
+  return <ClientStack />;
 }

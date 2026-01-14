@@ -1,24 +1,44 @@
-import { TouchableOpacity, Text, StyleSheet } from "react-native";
+import React from "react";
+import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, View } from "react-native";
+import { useTheme } from "../theme/ThemeProvider";
 
-export default function PrimaryButton({ title, onPress }: any) {
+export default function PrimaryButton({ title, onPress, disabled = false, isLoading = false }: any) {
+  const { theme } = useTheme();
   return (
-    <TouchableOpacity style={styles.button} onPress={onPress}>
-      <Text style={styles.text}>{title}</Text>
+    <TouchableOpacity
+      style={[styles.button, { backgroundColor: theme.colors.primary }, disabled && styles.disabled]}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <View style={styles.content}>
+        {isLoading ? <ActivityIndicator color="#fff" style={{ marginRight: 10 }} /> : null}
+        <Text style={[styles.text, { color: theme.colors.text }]}>{title}</Text>
+      </View>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    backgroundColor: "#9B5CFF",
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderRadius: 14,
-    marginTop: 16,
+    marginTop: 0,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  content: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
   text: {
-    color: "white",
     textAlign: "center",
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: "700",
+  },
+  disabled: {
+    opacity: 0.7,
   },
 });

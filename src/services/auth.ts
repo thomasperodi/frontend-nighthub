@@ -1,0 +1,41 @@
+import * as SecureStore from 'expo-secure-store';
+import { api, setAuthToken } from './api';
+
+const TOKEN_KEY = 'auth_token';
+const USER_KEY = 'auth_user';
+
+export async function login(email: string, password: string) {
+  const res = await api.post('/auth/login', { email, password });
+  return res.data; // { access_token, user }
+}
+
+export async function persistLogin(token: string, user: any) {
+  await SecureStore.setItemAsync(TOKEN_KEY, token);
+  await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
+  setAuthToken(token);
+}
+
+export async function clearLogin() {
+  await SecureStore.deleteItemAsync(TOKEN_KEY);
+  await SecureStore.deleteItemAsync(USER_KEY);
+  setAuthToken(null);
+}
+
+export async function logoutApi() {
+  // call backend logout (uses Authorization header if set)
+  await api.post('/auth/logout');
+}
+
+export async function deleteAccountApi() {
+  // delete current user (requires Authorization header)
+  const res = await api.delete('/auth/me');
+  return res.data;
+}
+
+export async function restoreLogin() {
+  const token = await SecureStore.getItemAsync(TOKEN_KEY);
+  const userJson = await SecureStore.getItemAsync(USER_KEY);
+  const user = userJson ? JSON.parse(userJson) : null;
+  if (token) setAuthToken(token);
+  return { token, user };
+}

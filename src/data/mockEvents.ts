@@ -1,0 +1,53 @@
+export const MOCK_EVENTS = [
+  {
+    id: "1",
+    title: "Sunset Groove - DJ Night",
+    date: "12 Gen",
+    time: "22:00",
+    venue: "Club Aurora",
+    city: "Milano",
+    tags: ["Elettronica", "Dj set"],
+    promos: [
+      { id: 'p1', title: 'Shot omaggio ai primi 100', details: 'Primi 100 ospiti riceveranno uno shot gratuito', validUntil: '12 Gen 23:59' },
+      { id: 'p2', title: 'Happy Hour 2x1', details: 'Cocktail 2x1 dalle 22 alle 23' },
+    ],
+    image: "https://images.unsplash.com/photo-1509228468518-180dd4864904?q=80&w=1200&auto=format&fit=crop&ixlib=rb-4.0.3&s=1",
+  },
+  {
+    id: "2",
+    title: "Live: The Jazz Collective",
+    date: "15 Gen",
+    time: "21:30",
+    venue: "Blue Note",
+    city: "Torino",
+    tags: ["Live", "Jazz"],
+    promos: [
+      { id: 'p3', title: 'Ingresso ridotto studenti', details: 'Presenta tessera universitaria', validUntil: '15 Gen' },
+    ],
+    image: "https://images.unsplash.com/photo-1485579149621-3123dd979885?q=80&w=1200&auto=format&fit=crop&ixlib=rb-4.0.3&s=2",
+  },
+  {
+    id: "3",
+    title: "Latino Fiesta",
+    date: "20 Gen",
+    time: "23:00",
+    venue: "La Salsa",
+    city: "Roma",
+    tags: ["Latino", "Ballo"],
+    promos: [
+      { id: 'p4', title: 'Donna omaggio entro mezzanotte', details: 'Ingresso gratuito per donne entro le 00:00', validUntil: '20 Gen 00:00' },
+    ],
+    image: "https://images.unsplash.com/photo-1520975924630-3d3f0f7b8a7f?q=80&w=1200&auto=format&fit=crop&ixlib=rb-4.0.3&s=3",
+  },
+  {
+    id: "4",
+    title: "Sunday Chill - Acoustic",
+    date: "25 Gen",
+    time: "18:00",
+    venue: "Terrazza Verde",
+    city: "Milano",
+    tags: ["Live", "Acustico"],
+    promos: [],
+    image: "https://images.unsplash.com/photo-1511379938547-c1f69419868d?q=80&w=1200&auto=format&fit=crop&ixlib=rb-4.0.3&s=4",
+  },
+];
