@@ -138,9 +138,9 @@ export default function LoginScreen({ navigation }: any) {
               />
             </View>
 
-            <TouchableOpacity onPress={handleForgotPassword} accessibilityRole="button">
+            {/* <TouchableOpacity onPress={handleForgotPassword} accessibilityRole="button">
               <Text style={[styles.forgotText, { color: theme.colors.muted }]}>Password dimenticata?</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
 
             <PrimaryButton
               title={isSubmitting ? "Accedendo..." : "Accedi"}
@@ -149,7 +149,7 @@ export default function LoginScreen({ navigation }: any) {
               isLoading={isSubmitting}
             />
 
-            <Text style={[styles.or, { color: theme.colors.muted }]}>— oppure —</Text>
+            {/* <Text style={[styles.or, { color: theme.colors.muted }]}>— oppure —</Text>
 
             <TouchableOpacity
               style={[styles.googleButton, isSubmitting && { opacity: 0.7 }, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
@@ -162,7 +162,6 @@ export default function LoginScreen({ navigation }: any) {
                 <ActivityIndicator color={theme.colors.text} />
               ) : (
                 <View style={styles.googleContent}>
-                  {/* <GoogleLogo /> */}
                   <Text style={[styles.googleText, { color: theme.colors.text }]}>Accedi con Google</Text>
                 </View>
               )}
@@ -173,7 +172,7 @@ export default function LoginScreen({ navigation }: any) {
               <TouchableOpacity onPress={() => navigation.navigate("Register")}> 
                 <Text style={[styles.signup, { color: theme.colors.text }]}> Crea uno</Text>
               </TouchableOpacity>
-            </View>
+            </View> */}
           </View>
         </View>
       </TouchableWithoutFeedback>

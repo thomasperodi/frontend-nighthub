@@ -1,23 +1,46 @@
-import React, { useState } from "react";
-import { Modal, View, Text, TouchableOpacity, Pressable, StyleSheet, FlatList, TextInput, Switch, Keyboard, ScrollView, KeyboardAvoidingView, Platform, ToastAndroid, Alert } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  Modal,
+  View,
+  Text,
+  TouchableOpacity,
+  Pressable,
+  StyleSheet,
+  FlatList,
+  TextInput,
+  Switch,
+  Keyboard,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+} from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
+import { listVenueTables } from "../services/tables";
+import type { VenueTable } from "../types/tables";
+import { fetchReservationsByEvent } from "../services/reservations";
+import type { Reservation } from "../types/reservations";
 
-const DEFAULT_ZONES = [
-  { id: 'z1', name: 'Indoor', available: 6, seatsPerTable: 4, maxPeople: 12, minSpendPerTable: 200 },
-  { id: 'z2', name: 'Outdoor', available: 4, seatsPerTable: 6, minSpendPerTable: 300 },
-  { id: 'z3', name: 'VIP', available: 2, seatsPerTable: 8, maxPeople: 8, minSpendPerTable: 500 },
-];
+function asNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
 
-function makeTablesForZone(zoneId: string) {
-  // simple mocked tables for demo purposes
-  return Array.from({ length: 6 }).map((_, i) => ({ id: `${zoneId}-t${i + 1}`, name: `Tav ${i + 1}`, seats: 2 + (i % 3) }));
+function zoneLabel(zona?: string | null): string {
+  const trimmed = (zona ?? '').trim();
+  return trimmed.length ? trimmed : 'Senza zona';
 }
 
 export default function TableBookingModal({ visible, onClose, event, onBooked }: any) {
   const { theme } = useTheme();
-  const [zone, setZone] = useState(DEFAULT_ZONES[0]);
-  const [availability, setAvailability] = useState<Record<string, number>>(Object.fromEntries(DEFAULT_ZONES.map(z => [z.id, z.available])));
-  const [selectedTable, setSelectedTable] = useState<any | null>(null);
+  const [loadingTables, setLoadingTables] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [tables, setTables] = useState<VenueTable[]>([]);
+  const [bookedTableIds, setBookedTableIds] = useState<string[]>([]);
+  const [selectedZone, setSelectedZone] = useState<string>('');
+  const [selectedTable, setSelectedTable] = useState<VenueTable | null>(null);
   const [people, setPeople] = useState<string>('');
   const [inviteName, setInviteName] = useState<string>('');
   const [inviteExternal, setInviteExternal] = useState<boolean>(false);
@@ -28,10 +51,151 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
   const [lastReservation, setLastReservation] = useState<any | null>(null);
   const [bookingFinished, setBookingFinished] = useState<boolean>(false);
 
-  const chooseZone = (z: any) => {
-    setZone(z);
+  const venueId: string | undefined =
+    event?.venue_id ?? event?.venue?.id ?? event?.venueId ?? undefined;
+
+  const eventId: string | undefined = event?.id ?? event?.event_id ?? undefined;
+
+  const bookedSet = useMemo(() => new Set(bookedTableIds), [bookedTableIds]);
+
+  const computeBookedTableIds = (reservations: Reservation[]): string[] => {
+    const set = new Set<string>();
+    for (const r of reservations) {
+      if (r?.type !== 'table') continue;
+      const tableId = r?.venue_table_id ?? r?.venue_table?.id;
+      if (!tableId) continue;
+
+      const st = String(r?.status ?? '').trim().toLowerCase();
+      // Se è stata annullata, il tavolo torna prenotabile.
+      if (st === 'cancelled') continue;
+
+      set.add(tableId);
+    }
+    return Array.from(set);
+  };
+
+  const isTableAvailableNow = async (tableId: string): Promise<boolean> => {
+    if (!eventId) return false;
+    try {
+      const reservations = await fetchReservationsByEvent(eventId);
+      const booked = new Set(computeBookedTableIds(Array.isArray(reservations) ? reservations : []));
+      return !booked.has(tableId);
+    } catch {
+      // In caso di errore rete, blocco la prenotazione per evitare overbooking.
+      return false;
+    }
+  };
+
+  const zones = useMemo(() => {
+    const uniq = new Set<string>();
+    for (const t of tables) uniq.add(zoneLabel(t.zona));
+    return Array.from(uniq).sort((a, b) => a.localeCompare(b));
+  }, [tables]);
+
+  const tablesByZone = useMemo(() => {
+    const map = new Map<string, VenueTable[]>();
+    for (const t of tables) {
+      const z = zoneLabel(t.zona);
+      const list = map.get(z) ?? [];
+      list.push(t);
+      map.set(z, list);
+    }
+    for (const [z, list] of map.entries()) {
+      list.sort((a, b) => {
+        const an = a.numero ?? 999999;
+        const bn = b.numero ?? 999999;
+        if (an !== bn) return an - bn;
+        return (a.nome ?? '').localeCompare(b.nome ?? '');
+      });
+      map.set(z, list);
+    }
+    return map;
+  }, [tables]);
+
+  const visibleTables = useMemo(() => {
+    const z = selectedZone || zones[0] || '';
+    if (!z) return [];
+    return tablesByZone.get(z) ?? [];
+  }, [selectedZone, zones, tablesByZone]);
+
+  const reloadAvailability = async () => {
+    if (!venueId) {
+      setTables([]);
+      setBookedTableIds([]);
+      setSelectedZone('');
+      setError('Evento senza venue_id: impossibile caricare i tavoli.');
+      return;
+    }
+
+    if (!eventId) {
+      setTables([]);
+      setBookedTableIds([]);
+      setSelectedZone('');
+      setError('Evento non valido: manca event_id.');
+      return;
+    }
+
+    try {
+      setLoadingTables(true);
+      setError(null);
+
+      const [tablesRes, reservationsRes] = await Promise.allSettled([
+        listVenueTables(venueId),
+        fetchReservationsByEvent(eventId),
+      ]);
+
+      const allTables: VenueTable[] =
+        tablesRes.status === 'fulfilled' && Array.isArray(tablesRes.value) ? tablesRes.value : [];
+      const reservations: Reservation[] =
+        reservationsRes.status === 'fulfilled' && Array.isArray(reservationsRes.value) ? reservationsRes.value : [];
+
+      const booked = computeBookedTableIds(reservations);
+      const bookedIdSet = new Set(booked);
+      const availableTables = allTables.filter((t) => !bookedIdSet.has(t.id));
+
+      setBookedTableIds(booked);
+      setTables(availableTables);
+
+      // Se il tavolo selezionato diventa non disponibile, lo deseleziono.
+      if (selectedTable && bookedIdSet.has(selectedTable.id)) {
+        setSelectedTable(null);
+        setAcceptMinSpend(false);
+      }
+
+      const z0 = zoneLabel(availableTables?.[0]?.zona ?? null);
+      setSelectedZone((prev) => prev || z0);
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.message || e?.message || 'Errore nel caricamento tavoli';
+      setError(status ? `${msg} (${status})` : msg);
+      setTables([]);
+      setBookedTableIds([]);
+    } finally {
+      setLoadingTables(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!visible) return;
+
+    // reset UI when opening
+    setError(null);
+    setReservationPreview(null);
+    setBookingFinished(false);
+    setLastReservation(null);
+    setSelectedTable(null);
+    setAcceptMinSpend(false);
+    setSubmitting(false);
+    setBookedTableIds([]);
+
+    void reloadAvailability();
+  }, [visible, venueId, eventId]);
+
+  const chooseZone = (z: string) => {
+    setSelectedZone(z);
     setSelectedTable(null);
     setError(null);
+    setAcceptMinSpend(false);
   };
 
   const addInvite = () => {
@@ -51,8 +215,8 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
       return false;
     }
 
-    if ((zone as any).maxPeople && count > (zone as any).maxPeople) {
-      setError(`Massimo ${ (zone as any).maxPeople } persone per la zona ${zone.name}.`);
+    if (selectedTable?.persone_max && count > selectedTable.persone_max) {
+      setError(`Massimo ${selectedTable.persone_max} persone per questo tavolo.`);
       return false;
     }
 
@@ -62,47 +226,55 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
 
   const confirm = () => {
     setError(null);
-    const seatsPerTable = zone.seatsPerTable || 4;
     const peopleCount = Number(people);
     if (!Number.isInteger(peopleCount) || peopleCount < 1) {
       setError('Inserisci almeno 1 persona.');
       return;
     }
-    const neededTables = Math.ceil(peopleCount / seatsPerTable);
-    const av = availability[zone.id] ?? 0;
-    if (neededTables > av) {
-      setError(`Non ci sono abbastanza tavoli disponibili in ${zone.name} (servono ${neededTables}, disponibili ${av}).`);
+
+    if (!selectedTable) {
+      setError('Seleziona un tavolo per continuare.');
       return;
     }
 
-    // allocate table ids (mock)
-    const assignedTables = Array.from({ length: neededTables }).map((_, i) => `${zone.id}-auto-${Date.now()}-${i}`);
-
-    // enforce minimum spend check using zone data if present
-    const minSpendPerTable = (zone as any).minSpendPerTable ?? 0;
-    const totalMin = minSpendPerTable * neededTables;
-    if (minSpendPerTable > 0 && !acceptMinSpend) {
-      setError(`Il minimo spesa per questa selezione è ${totalMin}€ (${minSpendPerTable}€/tavolo). Attiva il toggle per accettare.`);
+    if (bookedSet.has(selectedTable.id)) {
+      setError('Questo tavolo è già prenotato per questa serata. Selezionane un altro.');
+      void reloadAvailability();
       return;
     }
+
+    if (selectedTable.persone_max && peopleCount > selectedTable.persone_max) {
+      setError(`Massimo ${selectedTable.persone_max} persone per questo tavolo.`);
+      return;
+    }
+
+    const minSpend = asNumber(selectedTable.costo_minimo) ?? 0;
+    if (minSpend > 0 && !acceptMinSpend) {
+      setError(`Il minimo spesa per questo tavolo è ${minSpend}€. Attiva il toggle per accettare.`);
+      return;
+    }
+
+    const perTesta = asNumber(selectedTable.per_testa);
+    const totalAmount = perTesta !== null ? perTesta * peopleCount : undefined;
+
+    const labelNumero = selectedTable.numero ? `Tavolo ${selectedTable.numero}` : selectedTable.nome;
+    const z = zoneLabel(selectedTable.zona);
 
     const reservation = {
-      id: `r_${Date.now()}`,
       type: 'table',
-      eventId: event.id,
-      eventTitle: event.title,
-      zoneId: zone.id,
-      zoneName: zone.name,
-      tableCount: neededTables,
-      assignedTables,
-      seats: peopleCount,
-      invitees,
-      minSpendPerTable,
-      totalMin,
-      createdAt: new Date().toISOString(),
-      qrToken: `QR_${Math.random().toString(36).slice(2, 10)}`,
+      event_id: event?.id ?? event?.event_id,
+      guests: peopleCount,
+      venue_table_id: selectedTable.id,
       status: 'pending',
-      promoAppliedId: null,
+      total_amount: totalAmount,
+      meta: {
+        zona: z,
+        table_label: labelNumero,
+        numero: selectedTable.numero ?? null,
+        per_testa: perTesta,
+        costo_minimo: minSpend || null,
+      },
+      invitees,
     };
 
     // show preview/confirmation to user before finalizing
@@ -113,82 +285,127 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
     setReservationPreview(null);
   };
 
-  const finalizeBooking = () => {
-    if (!reservationPreview) return;
+  const finalizeBooking = async () => {
+    if (!reservationPreview || submitting) return;
+    if (!reservationPreview.event_id) {
+      setError('Evento non valido: manca event_id.');
+      return;
+    }
 
-    // decrease availability locally
-    setAvailability((prev) => ({ ...prev, [reservationPreview.zoneId]: (prev[reservationPreview.zoneId] || 0) - reservationPreview.tableCount }));
+    const tableId: string | undefined = reservationPreview?.venue_table_id;
+    if (tableId) {
+      const ok = await isTableAvailableNow(tableId);
+      if (!ok) {
+        setError('Questo tavolo è già prenotato per questa serata. Selezionane un altro.');
+        await reloadAvailability();
+        setReservationPreview(null);
+        return;
+      }
+    }
 
-    setLastReservation(reservationPreview);
-    setReservationPreview(null);
-    setBookingFinished(true);
+    try {
+      setSubmitting(true);
+      setError(null);
 
-    // notify parent
-    onBooked?.(reservationPreview);
+      // notify parent and wait for persistence
+      await Promise.resolve(onBooked?.(reservationPreview));
 
-    // show confirmation toast (Android) or alert (iOS)
-    if (Platform.OS === 'android') {
-      ToastAndroid.show('Prenotazione tavolo confermata!', ToastAndroid.SHORT);
-    } else {
-      Alert.alert('Prenotazione confermata', 'Il tuo tavolo è stato prenotato.');
+      setLastReservation(reservationPreview);
+      setReservationPreview(null);
+      setBookingFinished(true);
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.message || e?.message || 'Errore nella prenotazione';
+      setError(status ? `${msg} (${status})` : msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   // direct confirm availability check
   const isConfirmEnabled = () => {
-    const seatsPerTable = zone.seatsPerTable || 4;
     const peopleCount = Number(people);
     if (!Number.isInteger(peopleCount) || peopleCount < 1) return false;
-    const neededTables = Math.ceil(peopleCount / seatsPerTable);
-    const av = availability[zone.id] ?? 0;
-    if (neededTables > av) return false;
-    const minSpendPerTable = (zone as any).minSpendPerTable ?? 0;
-    if (minSpendPerTable > 0 && !acceptMinSpend) return false;
+
+    if (!selectedTable) return false;
+    if (selectedTable.persone_max && peopleCount > selectedTable.persone_max) return false;
+
+    const minSpend = asNumber(selectedTable.costo_minimo) ?? 0;
+    if (minSpend > 0 && !acceptMinSpend) return false;
     return true;
   };
 
-  const finalizeDirectBooking = () => {
+  const finalizeDirectBooking = async () => {
     if (!isConfirmEnabled()) {
       setError('Rivedi i dati: numero persone o minimo spesa non accettato.');
       return;
     }
-
-    const seatsPerTable = zone.seatsPerTable || 4;
+    if (submitting) return;
     const peopleCount = Number(people);
-    const neededTables = Math.ceil(peopleCount / seatsPerTable);
 
-    const assignedTables = Array.from({ length: neededTables }).map((_, i) => `${zone.id}-auto-${Date.now()}-${i}`);
-    const minSpendPerTable = (zone as any).minSpendPerTable ?? 0;
-    const totalMin = minSpendPerTable * neededTables;
+    if (!selectedTable) {
+      setError('Seleziona un tavolo.');
+      return;
+    }
+
+    if (bookedSet.has(selectedTable.id)) {
+      setError('Questo tavolo è già prenotato per questa serata. Selezionane un altro.');
+      await reloadAvailability();
+      return;
+    }
+
+    // Ultimo check prima di inviare (evita overbooking in caso di concorrenza)
+    const ok = await isTableAvailableNow(selectedTable.id);
+    if (!ok) {
+      setError('Questo tavolo è già prenotato per questa serata. Selezionane un altro.');
+      await reloadAvailability();
+      return;
+    }
+
+    const minSpend = asNumber(selectedTable.costo_minimo) ?? 0;
+    const perTesta = asNumber(selectedTable.per_testa);
+    const totalAmount = perTesta !== null ? perTesta * peopleCount : undefined;
+
+    const labelNumero = selectedTable.numero ? `Tavolo ${selectedTable.numero}` : selectedTable.nome;
+    const z = zoneLabel(selectedTable.zona);
 
     const reservation = {
-      id: `r_${Date.now()}`,
       type: 'table',
-      eventId: event.id,
-      eventTitle: event.title,
-      zoneId: zone.id,
-      zoneName: zone.name,
-      tableCount: neededTables,
-      assignedTables,
-      seats: peopleCount,
+      event_id: event?.id ?? event?.event_id,
+      guests: peopleCount,
+      venue_table_id: selectedTable.id,
+      status: 'confirmed',
+      total_amount: totalAmount,
+      meta: {
+        zona: z,
+        table_label: labelNumero,
+        numero: selectedTable.numero ?? null,
+        per_testa: perTesta,
+        costo_minimo: minSpend || null,
+      },
       invitees,
-      minSpendPerTable,
-      totalMin,
-      createdAt: new Date().toISOString(),
-      qrToken: `QR_${Math.random().toString(36).slice(2, 10)}`,
-      status: 'reserved',
-      promoAppliedId: null,
     };
 
-    // decrease availability locally
-    setAvailability((prev) => ({ ...prev, [zone.id]: (prev[zone.id] || 0) - neededTables }));
+    if (!reservation.event_id) {
+      setError('Evento non valido: manca event_id.');
+      return;
+    }
 
-    setLastReservation(reservation);
-    setReservationPreview(null);
-    setBookingFinished(true);
+    try {
+      setSubmitting(true);
+      setError(null);
+      await Promise.resolve(onBooked?.(reservation));
 
-    // notify parent
-    onBooked?.(reservation);
+      setLastReservation(reservation);
+      setReservationPreview(null);
+      setBookingFinished(true);
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.message || e?.message || 'Errore nella prenotazione';
+      setError(status ? `${msg} (${status})` : msg);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -206,25 +423,127 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
                   <View style={{ width: 40 }} />
                 </View>
 
+                {loadingTables ? (
+                  <View style={{ paddingVertical: 18, alignItems: 'center', gap: 10 }}>
+                    <ActivityIndicator color={theme.colors.primary} />
+                    <Text style={{ color: theme.colors.muted, fontWeight: '700' }}>Caricamento tavoli…</Text>
+                  </View>
+                ) : null}
+
+                {!loadingTables && !venueId ? (
+                  <Text style={{ color: '#ff6b6b', fontWeight: '700', marginTop: 10 }}>
+                    ⚠ Evento senza venue: impossibile prenotare tavoli.
+                  </Text>
+                ) : null}
+
+                {!loadingTables && venueId && eventId && tables.length === 0 ? (
+                  <Text style={{ color: theme.colors.muted, fontWeight: '700', marginTop: 10 }}>
+                    Nessun tavolo disponibile per questa serata.
+                  </Text>
+                ) : null}
+
+                {!loadingTables && venueId && eventId && bookedTableIds.length > 0 ? (
+                  <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 6, fontWeight: '700' }}>
+                    Tavoli già prenotati: {bookedTableIds.length}
+                  </Text>
+                ) : null}
+
                 {/* STEP 1: Zone Selection */}
                 <View style={{ marginTop: 20 }}>
                   <Text style={[{ color: theme.colors.text, fontWeight: '700', fontSize: 14, marginBottom: 12 }]}>Step 1: Scegli la zona</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 12 }}>
-                    {DEFAULT_ZONES.map((z) => (
-                      <TouchableOpacity key={z.id} onPress={() => chooseZone(z)} style={[styles.zoneBtn, { borderColor: z.id === zone.id ? theme.colors.primary : theme.colors.border, backgroundColor: z.id === zone.id ? theme.colors.primary : theme.colors.card, marginRight: 8 }]}>
-                        <Text style={{ color: z.id === zone.id ? theme.colors.surface : theme.colors.text, fontWeight: '700', fontSize: 13 }}>{z.name}</Text>
-                        <Text style={{ color: z.id === zone.id ? theme.colors.surface : theme.colors.muted, fontSize: 10, marginTop: 4 }}>
-                          {(availability[z.id] ?? z.available)} tavoli
-                        </Text>
-                        {z.minSpendPerTable ? <Text style={{ color: z.id === zone.id ? theme.colors.surface : theme.colors.muted, fontSize: 9, marginTop: 2 }}>min {z.minSpendPerTable}€</Text> : null}
-                      </TouchableOpacity>
-                    ))}
+                    {zones.map((z) => {
+                      const active = z === (selectedZone || zones[0]);
+                      const count = (tablesByZone.get(z)?.length ?? 0);
+                      if (count === 0) return null;
+                      return (
+                        <TouchableOpacity
+                          key={z}
+                          onPress={() => chooseZone(z)}
+                          style={[
+                            styles.zoneBtn,
+                            {
+                              borderColor: active ? theme.colors.primary : theme.colors.border,
+                              backgroundColor: active ? theme.colors.primary : theme.colors.card,
+                              marginRight: 8,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={{
+                              color: active ? theme.colors.surface : theme.colors.text,
+                              fontWeight: '800',
+                              fontSize: 13,
+                            }}
+                          >
+                            {z}
+                          </Text>
+                          <Text style={{ color: active ? theme.colors.surface : theme.colors.muted, fontSize: 10, marginTop: 4 }}>
+                            {count} tavoli
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </ScrollView>
                 </View>
 
-                {/* STEP 2: People & Details */}
+                {/* STEP 2: Table Selection */}
+                <View style={{ marginTop: 16 }}>
+                  <Text style={[{ color: theme.colors.text, fontWeight: '700', fontSize: 14, marginBottom: 10 }]}>Step 2: Scegli il tavolo</Text>
+                  <FlatList
+                    data={visibleTables}
+                    keyExtractor={(t) => t.id}
+                    scrollEnabled={false}
+                    renderItem={({ item: t }) => {
+                      const active = selectedTable?.id === t.id;
+                      const perTesta = asNumber(t.per_testa);
+                      const minSpend = asNumber(t.costo_minimo);
+                      return (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setSelectedTable(t);
+                            setError(null);
+                            setAcceptMinSpend(false);
+                          }}
+                          style={[
+                            styles.tableCard,
+                            {
+                              borderColor: active ? theme.colors.primary : theme.colors.border,
+                              backgroundColor: theme.colors.card,
+                            },
+                          ]}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 14 }}>
+                              {t.numero ? `Tavolo ${t.numero}` : t.nome}
+                            </Text>
+                            {active ? (
+                              <Text style={{ color: theme.colors.primary, fontWeight: '900' }}>Selezionato</Text>
+                            ) : null}
+                          </View>
+
+                          <View style={{ height: 6 }} />
+                          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                            {t.nome}
+                            {t.persone_max ? ` • max ${t.persone_max} persone` : ''}
+                          </Text>
+
+                          {(perTesta !== null || minSpend !== null) ? (
+                            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
+                              {perTesta !== null ? `€ ${perTesta} / persona` : ''}
+                              {perTesta !== null && minSpend !== null ? ' • ' : ''}
+                              {minSpend !== null ? `minimo € ${minSpend}` : ''}
+                            </Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    }}
+                  />
+                </View>
+
+                {/* STEP 3: People & Details */}
                 <View style={{ marginTop: 20 }}>
-                  <Text style={[{ color: theme.colors.text, fontWeight: '700', fontSize: 14, marginBottom: 12 }]}>Step 2: Persone e dettagli</Text>
+                  <Text style={[{ color: theme.colors.text, fontWeight: '700', fontSize: 14, marginBottom: 12 }]}>Step 3: Persone e dettagli</Text>
                   
                   <View style={{ marginBottom: 12 }}>
                     <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 6 }}>Numero di persone</Text>
@@ -242,14 +561,27 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
                     />
                   </View>
 
-                  {zone.maxPeople ? <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 12 }}>Massimo {zone.maxPeople} persone in questa zona</Text> : null}
+                  {selectedTable?.persone_max ? (
+                    <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 12 }}>
+                      Massimo {selectedTable.persone_max} persone per questo tavolo
+                    </Text>
+                  ) : null}
+
+                  {selectedTable && (asNumber(selectedTable.costo_minimo) ?? 0) > 0 ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: '800' }}>
+                        Accetto minimo spesa (€ {asNumber(selectedTable.costo_minimo)})
+                      </Text>
+                      <Switch value={acceptMinSpend} onValueChange={setAcceptMinSpend} />
+                    </View>
+                  ) : null}
 
                   {error ? <Text style={{ color: '#ff6b6b', marginBottom: 12, fontWeight: '600' }}>⚠ {error}</Text> : null}
                 </View>
 
-                {/* STEP 3: Invitees */}
+                {/* STEP 4: Invitees */}
                 <View style={{ marginTop: 20 }}>
-                  <Text style={[{ color: theme.colors.text, fontWeight: '700', fontSize: 14, marginBottom: 12 }]}>Step 3: Invita amici (opzionale)</Text>
+                  <Text style={[{ color: theme.colors.text, fontWeight: '700', fontSize: 14, marginBottom: 12 }]}>Step 4: Invita amici (opzionale)</Text>
                   <View style={{ flexDirection: 'row', marginBottom: 8, alignItems: 'flex-end', gap: 8 }}>
                     <TextInput 
                       placeholder="username o telefono" 
@@ -284,27 +616,28 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
                   ) : null}
                 </View>
 
-                {/* STEP 4: Min Spend */}
-                {zone.minSpendPerTable ? (
-                  <View style={{ marginTop: 20, backgroundColor: theme.colors.card, borderRadius: 8, padding: 12, borderWidth: 1, borderColor: theme.colors.primary }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>Minimo spesa: {zone.minSpendPerTable}€/tavolo</Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}>È richiesto un consumo minimo a questo tavolo</Text>
-                      </View>
-                      <Switch value={acceptMinSpend} onValueChange={setAcceptMinSpend} trackColor={{ true: theme.colors.primary, false: theme.colors.border }} />
-                    </View>
-                  </View>
-                ) : null}
-
                 {/* Summary Preview */}
                 {reservationPreview && (
                   <View style={{ marginTop: 20, backgroundColor: theme.colors.primary, borderRadius: 8, padding: 12 }}>
                     <Text style={{ color: theme.colors.surface, fontWeight: '700', fontSize: 13 }}>Riepilogo prenotazione ✓</Text>
-                    <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 8 }}>📍 {reservationPreview.zoneName}</Text>
-                    <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 4 }}>👥 {reservationPreview.seats} persone</Text>
-                    <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 4 }}>🪑 {reservationPreview.tableCount} tavolo{reservationPreview.tableCount > 1 ? 'i' : ''}</Text>
-                    {reservationPreview.totalMin ? <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 4, fontWeight: '600' }}>💰 Min spesa: {reservationPreview.totalMin}€</Text> : null}
+                    <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 8 }}>📍 {reservationPreview.meta?.zona ?? '-'}</Text>
+                    <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 4 }}>🪑 {reservationPreview.meta?.table_label ?? '-'}</Text>
+                    <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 4 }}>👥 {reservationPreview.guests} persone</Text>
+                    {typeof reservationPreview.meta?.per_testa === 'number' ? (
+                      <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 4 }}>
+                        💶 € {reservationPreview.meta.per_testa} / persona
+                      </Text>
+                    ) : null}
+                    {reservationPreview.meta?.costo_minimo ? (
+                      <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 4, fontWeight: '700' }}>
+                        💰 Minimo: € {reservationPreview.meta.costo_minimo}
+                      </Text>
+                    ) : null}
+                    {typeof reservationPreview.total_amount === 'number' ? (
+                      <Text style={{ color: theme.colors.surface, fontSize: 12, marginTop: 4, fontWeight: '700' }}>
+                        Totale stimato: € {reservationPreview.total_amount}
+                      </Text>
+                    ) : null}
                   </View>
                 )}
 
@@ -320,10 +653,26 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
             <View style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 12, paddingHorizontal: 4, gap: 8 }}>
               {reservationPreview ? (
                 <View style={{ gap: 8 }}>
-                  <TouchableOpacity onPress={finalizeBooking} style={{ padding: 12, backgroundColor: theme.colors.primary, borderRadius: 8, alignItems: 'center' }}>
-                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>✓ Conferma prenotazione</Text>
+                  <TouchableOpacity
+                    disabled={submitting}
+                    onPress={finalizeBooking}
+                    style={[
+                      { padding: 12, backgroundColor: theme.colors.primary, borderRadius: 8, alignItems: 'center' },
+                      submitting && { opacity: 0.7 },
+                    ]}
+                  >
+                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
+                      {submitting ? 'Salvataggio…' : '✓ Conferma prenotazione'}
+                    </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={cancelPreview} style={{ padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, alignItems: 'center' }}>
+                  <TouchableOpacity
+                    disabled={submitting}
+                    onPress={cancelPreview}
+                    style={[
+                      { padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, alignItems: 'center' },
+                      submitting && { opacity: 0.6 },
+                    ]}
+                  >
                     <Text style={{ color: theme.colors.muted, fontWeight: '600' }}>Indietro</Text>
                   </TouchableOpacity>
                 </View>
@@ -333,10 +682,24 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
                 </TouchableOpacity>
               ) : (
                 <View style={{ gap: 8 }}>
-                  <TouchableOpacity disabled={!isConfirmEnabled()} onPress={confirm} style={[{ padding: 12, backgroundColor: theme.colors.primary, borderRadius: 8, alignItems: 'center' }, !isConfirmEnabled() && { opacity: 0.5 }]}>
+                  <TouchableOpacity
+                    disabled={!isConfirmEnabled() || submitting}
+                    onPress={confirm}
+                    style={[
+                      { padding: 12, backgroundColor: theme.colors.primary, borderRadius: 8, alignItems: 'center' },
+                      (!isConfirmEnabled() || submitting) && { opacity: 0.5 },
+                    ]}
+                  >
                     <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>Conferma prenotazione</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={onClose} style={{ padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, alignItems: 'center' }}>
+                  <TouchableOpacity
+                    disabled={submitting}
+                    onPress={onClose}
+                    style={[
+                      { padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, alignItems: 'center' },
+                      submitting && { opacity: 0.6 },
+                    ]}
+                  >
                     <Text style={{ color: theme.colors.muted, fontWeight: '600' }}>Annulla</Text>
                   </TouchableOpacity>
                 </View>
@@ -380,9 +743,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start', 
     minWidth: 100 
   },
-  tableRow: { 
-    padding: 12, 
-    borderRadius: 10, 
-    borderWidth: 1 
-  }
+  tableCard: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
 });

@@ -6,13 +6,26 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://backend-nighthub-788g.vercel.app",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://pjeptyhgwaevnlgpovzb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_BUCKET_EVENTS": "NightHub",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqZXB0eWhnd2Fldm5sZ3BvdnpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI5OTIzODIsImV4cCI6MjA2ODU2ODM4Mn0.BPNUU_TBPl3rN5OVnGHWlRGDmdjQaPnzuifDmCqjC4g"
+      }
     },
     "preview": {
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://backend-nighthub-788g.vercel.app",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://pjeptyhgwaevnlgpovzb.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_BUCKET_EVENTS": "NightHub",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqZXB0eWhnd2Fldm5sZ3BvdnpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI5OTIzODIsImV4cCI6MjA2ODU2ODM4Mn0.BPNUU_TBPl3rN5OVnGHWlRGDmdjQaPnzuifDmCqjC4g"
+      }
+      
     }
   },
   "submit": {

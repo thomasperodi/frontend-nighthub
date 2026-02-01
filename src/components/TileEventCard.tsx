@@ -1,12 +1,18 @@
 import React from "react";
 import { View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
+import { resolveEventImageUri } from "../utils/media";
 
 export default function TileEventCard({ item, onPress }: any) {
   const { theme } = useTheme();
+  const uri = resolveEventImageUri(item.image);
   return (
     <TouchableOpacity style={[styles.wrap, { backgroundColor: theme.colors.card }]} onPress={() => onPress?.(item)}>
-      <Image source={{ uri: item.image }} style={styles.image} />
+      {uri ? (
+        <Image source={{ uri }} style={styles.image} />
+      ) : (
+        <View style={[styles.image, { backgroundColor: theme.colors.card }]} />
+      )}
       <View style={styles.overlay}>
         <Text style={[styles.title, { color: theme.colors.text }]} numberOfLines={2}>{item.title}</Text>
         <Text style={[styles.meta, { color: theme.colors.muted }]}>{item.date} • {item.time}</Text>

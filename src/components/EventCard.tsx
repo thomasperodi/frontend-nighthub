@@ -3,15 +3,21 @@ import { View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeProvider";
 
+import { resolveEventImageUri } from "../utils/media";
 export default function EventCard({ item, onPress }: any) {
   const { theme } = useTheme();
   const [fav, setFav] = useState(false);
+  const uri = resolveEventImageUri(item.image);
 
   return (
     <TouchableOpacity style={[styles.card, { backgroundColor: theme.colors.card }]} onPress={() => onPress?.(item)}>
       <View style={styles.imageWrap}>
-        <Image source={{ uri: item.image }} style={styles.image} />
-        <View style={[styles.badge, { backgroundColor: theme.colors.primary }]}> 
+        {uri ? (
+          <Image source={{ uri }} style={styles.image} />
+        ) : (
+          <View style={[styles.image, { backgroundColor: theme.colors.card }]} />
+        )}
+        <View style={[styles.badge, { backgroundColor: theme.colors.primary }]}>
           <Text style={[styles.badgeText, { color: theme.colors.text }]}>{item.tags[0]}</Text>
         </View>
 

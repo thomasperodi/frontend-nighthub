@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, FlatList, Image, StyleSheet, TouchableOpacity } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
+import { resolveEventImageUri } from "../utils/media";
 
 export default function FeaturedCarousel({ data, onPress }: any) {
   const { theme } = useTheme();
@@ -17,7 +18,11 @@ export default function FeaturedCarousel({ data, onPress }: any) {
         contentContainerStyle={{ paddingHorizontal: 12 }}
         renderItem={({ item }: any) => (
           <TouchableOpacity accessibilityRole="button" activeOpacity={0.85} style={[styles.card, { backgroundColor: theme.colors.card }]} onPress={() => onPress?.(item)}>
-            <Image source={{ uri: item.image }} style={styles.image} />
+            {resolveEventImageUri(item.image) ? (
+              <Image source={{ uri: resolveEventImageUri(item.image) }} style={styles.image} />
+            ) : (
+              <View style={[styles.image, { backgroundColor: theme.colors.card }]} />
+            )}
             <View style={styles.info}>
               <Text style={[styles.promoTitle, { color: theme.colors.text }]} numberOfLines={1}>{item.title}</Text>
               <Text style={[styles.promoMeta, { color: theme.colors.muted }]}>{item.discount} • fino al {item.until}</Text>

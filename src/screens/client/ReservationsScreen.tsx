@@ -27,8 +27,16 @@ export default function ReservationsScreen({ navigation }: any) {
         renderItem={({ item }) => (
           <TouchableOpacity onPress={() => navigation.navigate('ReservationDetail', { id: item.id })} style={[styles.row, { borderColor: theme.colors.border }]}>
             <View>
-              <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{item.eventTitle}</Text>
-              <Text style={{ color: theme.colors.muted }}>{item.zoneName} • {item.tableName}</Text>
+              <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{item.event?.name ?? item.event_id}</Text>
+              {item.type === 'table' ? (
+                <Text style={{ color: theme.colors.muted }}>
+                  {(item.venue_table?.zona ? `${item.venue_table.zona} • ` : '')}
+                  {item.venue_table?.numero ? `Tavolo ${item.venue_table.numero}` : (item.venue_table?.nome ?? 'Tavolo')}
+                  {item.guests ? ` • ${item.guests} ospiti` : ''}
+                </Text>
+              ) : (
+                <Text style={{ color: theme.colors.muted }}>Ingresso</Text>
+              )}
             </View>
             <View style={{ justifyContent: 'center' }}>
               <Text style={{ color: theme.colors.primary, fontWeight: '700' }}>{item.status}</Text>

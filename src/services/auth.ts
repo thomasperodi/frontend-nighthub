@@ -3,6 +3,16 @@ import { api, setAuthToken } from './api';
 
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
+const ONBOARDING_SEEN_KEY = 'onboarding_seen_v1';
+
+export async function getOnboardingSeen(): Promise<boolean> {
+  const value = await SecureStore.getItemAsync(ONBOARDING_SEEN_KEY);
+  return value === '1';
+}
+
+export async function setOnboardingSeen(seen: boolean = true): Promise<void> {
+  await SecureStore.setItemAsync(ONBOARDING_SEEN_KEY, seen ? '1' : '0');
+}
 
 export async function login(email: string, password: string) {
   const res = await api.post('/auth/login', { email, password });

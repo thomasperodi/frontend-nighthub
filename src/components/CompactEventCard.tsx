@@ -1,12 +1,18 @@
 import React from "react";
 import { View, Text, StyleSheet, Image, TouchableOpacity } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
+import { resolveEventImageUri } from "../utils/media";
 
 export default function CompactEventCard({ item, onPress }: any) {
   const { theme } = useTheme();
+  const uri = resolveEventImageUri(item.image);
   return (
     <TouchableOpacity style={[styles.row, { backgroundColor: theme.colors.card }]} onPress={() => onPress?.(item)}>
-      <Image source={{ uri: item.image }} style={styles.thumb} />
+      {uri ? (
+        <Image source={{ uri }} style={styles.thumb} />
+      ) : (
+        <View style={[styles.thumb, { backgroundColor: theme.colors.card }]} />
+      )}
       <View style={styles.content}>
         <Text style={[styles.title, { color: theme.colors.text }]} numberOfLines={1}>{item.title}</Text>
         <Text style={[styles.meta, { color: theme.colors.muted }]}>{item.date} • {item.venue}</Text>

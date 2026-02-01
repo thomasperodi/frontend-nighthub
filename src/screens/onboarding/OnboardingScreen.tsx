@@ -23,6 +23,7 @@ import * as Haptics from "expo-haptics";
 import GradientBackground from "../../components/GradientBackground";
 import PrimaryButton from "../../components/PrimaryButton";
 import { useTheme } from "../../theme/ThemeProvider"; 
+import { setOnboardingSeen } from "../../services/auth";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -89,6 +90,21 @@ export default function OnboardingScreen({ navigation }: any) {
   const flatListRef = useRef<FlatList>(null);
   const { theme } = useTheme();
 
+  useEffect(() => {
+    // Mark as seen as soon as user opens onboarding at least once.
+    (async () => {
+      try {
+        await setOnboardingSeen(true);
+      } catch {
+        // ignore storage errors
+      }
+    })();
+  }, []);
+
+  const completeOnboarding = async () => {
+    navigation.replace("Login");
+  };
+
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
       scrollX.value = event.contentOffset.x;
@@ -104,7 +120,7 @@ export default function OnboardingScreen({ navigation }: any) {
       setCurrentIndex(currentIndex + 1);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } else {
-      navigation.navigate("Login");
+      completeOnboarding();
     }
   };
 
@@ -155,7 +171,7 @@ export default function OnboardingScreen({ navigation }: any) {
       <View style={[styles.container, { paddingTop: insets.top }]}>
         {/* HEADER */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.navigate("Login")}>
+          <TouchableOpacity onPress={completeOnboarding}>
             <Text style={[styles.skipText, { color: theme.colors.muted }]}>Salta</Text>
           </TouchableOpacity>
         </View>

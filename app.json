@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "NightHub",
-    "slug": "nighthub",
-    "version": "1.0.1",
+    "slug": "frontend-app",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -13,14 +13,19 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.nighthub.app",
+      "supportsTablet": false,
+      "bundleIdentifier": "com.perodithomas.nighthub",
+      "buildNumber": "1",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Permette di scattare foto e scansionare contenuti per completare azioni nell'app.",
+        "NSPhotoLibraryUsageDescription": "Permette di selezionare foto dalla libreria per completare azioni nell'app.",
+        "NSPhotoLibraryAddUsageDescription": "Permette di salvare contenuti nella libreria foto.",
+        "NSLocationWhenInUseUsageDescription": "Usiamo la posizione per mostrare locali ed eventi nelle vicinanze e migliorare l'esperienza."
       }
     },
     "android": {
-      "package": "com.nighthub.app",
+      "package": "com.perodithomas.nighthub",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
@@ -34,7 +39,8 @@
     },
     "owner": "thomas88",
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-font"
     ]
   }
 }

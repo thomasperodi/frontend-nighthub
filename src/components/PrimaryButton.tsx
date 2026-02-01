@@ -6,6 +6,9 @@ export default function PrimaryButton({ title, onPress, disabled = false, isLoad
   const { theme } = useTheme();
   return (
     <TouchableOpacity
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={title}
       style={[styles.button, { backgroundColor: theme.colors.primary }, disabled && styles.disabled]}
       onPress={onPress}
       disabled={disabled}
