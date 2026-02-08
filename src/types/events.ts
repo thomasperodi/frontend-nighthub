@@ -49,6 +49,8 @@ export type Venue = {
   address?: string;
   description?: string;
   image?: string;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
   status?: 'active' | 'inactive' | 'pending';
   occupancy?: number;
   revenue?: number;

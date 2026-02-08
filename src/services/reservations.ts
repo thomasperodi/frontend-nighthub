@@ -73,9 +73,12 @@ function normalizeCreateReservationPayload(input: any): BackendReservationCreate
  * Fetch all user's reservations
  */
 export async function fetchReservations(userId?: string): Promise<Reservation[]> {
-  const { data } = await api.get<Reservation[]>(API_ENDPOINTS.RESERVATIONS.LIST, {
-    params: userId ? { user_id: userId } : undefined,
-  });
+  // New API behavior:
+  // - Auth required
+  // - For client role, backend always scopes to current user
+  // - For venue/staff role, event_id is required (use fetchReservationsByEvent)
+  // Keep signature for backward compatibility; userId is ignored.
+  const { data } = await api.get<Reservation[]>(API_ENDPOINTS.RESERVATIONS.LIST);
   return data;
 }
 
@@ -87,6 +90,17 @@ export async function fetchReservationsByEvent(eventId: string): Promise<Reserva
     params: { event_id: eventId },
   });
   return data;
+}
+
+/**
+ * Fetch booked table IDs for a specific event (availability check).
+ * This does not return reservation/user details.
+ */
+export async function fetchBookedTableIdsByEvent(eventId: string): Promise<string[]> {
+  const { data } = await api.get<string[]>('/reservations/booked-tables', {
+    params: { event_id: eventId },
+  });
+  return Array.isArray(data) ? data : [];
 }
 
 /**

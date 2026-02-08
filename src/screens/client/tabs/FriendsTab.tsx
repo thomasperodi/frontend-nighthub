@@ -1,8 +1,21 @@
-import React, { useState, useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, FlatList, Alert, SectionList } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, FlatList, Alert, SectionList, ActivityIndicator } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  acceptFriendRequest,
+  addFriendGroupMember,
+  createFriendGroup,
+  deleteFriendGroup,
+  listFriendGroups,
+  listFriendRequests,
+  listFriends,
+  removeFriend,
+  rejectFriendRequest,
+  searchUsers,
+  sendFriendRequest,
+} from "../../../services/friends";
 // Mock data - Amici
 const MOCK_FRIENDS = [
   {
@@ -52,6 +65,40 @@ const MOCK_FRIENDS = [
   },
 ];
 
+type FriendItem = {
+  id: string;
+  name: string;
+  online: boolean;
+  currentVenue: string | null;
+  status: string | null;
+  avatar: string;
+  lastSeen: string | null;
+};
+
+type FriendRequestItem = {
+  id: string;
+  name: string;
+  avatar: string;
+  sentAt: string;
+};
+
+type UserSearchItem = {
+  id: string;
+  name: string;
+  avatar: string;
+  isFriend: boolean;
+  mutualFriendsIds: string[];
+};
+
+type GroupItem = {
+  id: string;
+  name: string;
+  avatar: string;
+  members: string[];
+  color: string;
+  createdAt: Date;
+};
+
 // Mock data - Persone da aggiungere
 const MOCK_USERS_TO_ADD = [
   { id: 101, name: "Chiara Moretti", avatar: "👩", isFriend: false, mutualFriendsIds: [1, 4] },
@@ -99,10 +146,36 @@ export default function FriendsTab() {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const insets = useSafeAreaInsets();
   const bottomActionOffset = Math.max(insets.bottom, 16) + 90;
-  const [friends, setFriends] = useState(MOCK_FRIENDS);
-  const [friendRequests, setFriendRequests] = useState(MOCK_FRIEND_REQUESTS);
-  const [usersToAdd, setUsersToAdd] = useState(MOCK_USERS_TO_ADD);
-  const [groups, setGroups] = useState(MOCK_GROUPS);
+  const [friends, setFriends] = useState<FriendItem[]>(
+    MOCK_FRIENDS.map((f) => ({
+      ...f,
+      id: String(f.id),
+    }))
+  );
+  const [friendRequests, setFriendRequests] = useState<FriendRequestItem[]>(
+    MOCK_FRIEND_REQUESTS.map((r) => ({
+      ...r,
+      id: String(r.id),
+    }))
+  );
+  const [usersToAdd, setUsersToAdd] = useState<UserSearchItem[]>(
+    MOCK_USERS_TO_ADD.map((u) => ({
+      ...u,
+      id: String(u.id),
+      mutualFriendsIds: (u.mutualFriendsIds || []).map((id) => String(id)),
+    }))
+  );
+  const [groups, setGroups] = useState<GroupItem[]>(
+    MOCK_GROUPS.map((g) => ({
+      ...g,
+      id: String(g.id),
+      members: g.members.map((id) => String(id)),
+    }))
+  );
+  const [loadingFriends, setLoadingFriends] = useState(false);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [loadingSearch, setLoadingSearch] = useState(false);
   
   const [activeTab, setActiveTab] = useState<"friends" | "groups">("friends");
   const [searchText, setSearchText] = useState("");
@@ -113,10 +186,92 @@ export default function FriendsTab() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showVenueModal, setShowVenueModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
-  const [selectedGroupMembers, setSelectedGroupMembers] = useState<number[]>([]);
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
 
   const onlineFriends = friends.filter(f => f.online);
   const offlineFriends = friends.filter(f => !f.online);
+
+  useEffect(() => {
+    const loadAll = async () => {
+      setLoadingFriends(true);
+      setLoadingRequests(true);
+      setLoadingGroups(true);
+
+      try {
+        const [friendsRes, requestsRes, groupsRes] = await Promise.all([
+          listFriends(),
+          listFriendRequests(),
+          listFriendGroups(),
+        ]);
+
+        setFriends(
+          friendsRes.map((f) => ({
+            id: f.id,
+            name: f.name || f.username || "Utente",
+            online: false,
+            currentVenue: null,
+            status: null,
+            avatar: f.avatar || "👤",
+            lastSeen: "Ora",
+          }))
+        );
+
+        setFriendRequests(
+          requestsRes.incoming.map((req) => ({
+            id: req.id,
+            name: req.from_user.name || req.from_user.username || "Utente",
+            avatar: req.from_user.avatar || "👤",
+            sentAt: "Nuova",
+          }))
+        );
+
+        setGroups(
+          groupsRes.map((g) => ({
+            id: g.id,
+            name: g.name,
+            avatar: "👥",
+            members: g.members.map((m) => m.user.id),
+            color: "#6D5BFF",
+            createdAt: new Date(),
+          }))
+        );
+      } catch {
+        // fallback to mock data already in state
+      } finally {
+        setLoadingFriends(false);
+        setLoadingRequests(false);
+        setLoadingGroups(false);
+      }
+    };
+
+    loadAll();
+  }, []);
+
+  useEffect(() => {
+    const loadSearch = async () => {
+      const q = searchText.trim();
+      if (q.length < 2) return;
+      setLoadingSearch(true);
+      try {
+        const results = await searchUsers(q);
+        setUsersToAdd(
+          results.map((u) => ({
+            id: u.id,
+            name: u.name || u.username || "Utente",
+            avatar: u.avatar || "👤",
+            isFriend: false,
+            mutualFriendsIds: [],
+          }))
+        );
+      } catch {
+        // ignore search errors
+      } finally {
+        setLoadingSearch(false);
+      }
+    };
+
+    loadSearch();
+  }, [searchText]);
 
   const searchedUsers = useMemo(() => {
     return usersToAdd.filter(user =>
@@ -124,97 +279,145 @@ export default function FriendsTab() {
     );
   }, [searchText, usersToAdd]);
 
-  const getMutualFriends = (userId: number) => {
+  const getMutualFriends = (userId: string) => {
     const user = usersToAdd.find(u => u.id === userId);
     if (!user) return [];
     return friends.filter(f => user.mutualFriendsIds?.includes(f.id));
   };
 
-  const getGroupMembers = (groupId: number) => {
+  const getGroupMembers = (groupId: string) => {
     const group = groups.find(g => g.id === groupId);
     if (!group) return [];
     return friends.filter(f => group.members.includes(f.id));
   };
 
-  const handleSendFriendRequest = (userId: number, userName: string) => {
-    Alert.alert("Richiesta inviata", `Richiesta inviata a ${userName}!`, [
-      {
-        text: "OK",
-        onPress: () => {
-          setUsersToAdd(prev => prev.map(u => 
-            u.id === userId ? { ...u, isFriend: true } : u
-          ));
-          setSelectedProfile(null);
+  const handleSendFriendRequest = async (userId: number | string, userName: string) => {
+    try {
+      await sendFriendRequest({ user_id: String(userId) });
+      Alert.alert("Richiesta inviata", `Richiesta inviata a ${userName}!`, [
+        {
+          text: "OK",
+          onPress: () => {
+            setUsersToAdd(prev => prev.map(u => 
+              u.id === userId ? { ...u, isFriend: true } : u
+            ));
+            setSelectedProfile(null);
+          }
         }
-      }
-    ]);
+      ]);
+    } catch {
+      Alert.alert("Errore", "Impossibile inviare la richiesta");
+    }
   };
 
-  const handleAcceptFriendRequest = (userId: number, userName: string) => {
-    const newFriend = friendRequests.find(r => r.id === userId);
-    if (newFriend) {
+  const openFriendProfile = (friend: FriendItem) => {
+    setSelectedProfile({
+      id: friend.id,
+      name: friend.name,
+      avatar: friend.avatar,
+      isFriend: true,
+    });
+  };
+
+  const openRequestProfile = (request: FriendRequestItem) => {
+    setSelectedProfile({
+      id: request.id,
+      name: request.name,
+      avatar: request.avatar,
+      isFriend: false,
+      requestId: request.id,
+    });
+  };
+
+  const handleAcceptFriendRequest = async (requestId: number | string, userName: string) => {
+    try {
+      await acceptFriendRequest(String(requestId));
+      setFriendRequests(prev => prev.filter(r => r.id !== requestId));
       setFriends(prev => [...prev, {
-        ...newFriend,
-        id: newFriend.id,
-        name: newFriend.name,
-        avatar: newFriend.avatar,
+        id: String(requestId),
+        name: userName,
+        avatar: "👤",
         online: false,
         currentVenue: null,
         status: null,
         lastSeen: "Ora",
       }]);
-      setFriendRequests(prev => prev.filter(r => r.id !== userId));
       Alert.alert("✅ Amico aggiunto!", `${userName} è ora un tuo amico!`);
+    } catch {
+      Alert.alert("Errore", "Impossibile accettare la richiesta");
     }
   };
 
-  const handleRejectFriendRequest = (userId: number, userName: string) => {
-    setFriendRequests(prev => prev.filter(r => r.id !== userId));
-    Alert.alert("Richiesta rifiutata", `Hai rifiutato la richiesta di ${userName}`);
+  const handleRejectFriendRequest = async (requestId: number | string, userName: string) => {
+    try {
+      await rejectFriendRequest(String(requestId));
+      setFriendRequests(prev => prev.filter(r => r.id !== requestId));
+      Alert.alert("Richiesta rifiutata", `Hai rifiutato la richiesta di ${userName}`);
+    } catch {
+      Alert.alert("Errore", "Impossibile rifiutare la richiesta");
+    }
   };
 
-  const handleCreateGroup = () => {
+  const handleCreateGroup = async () => {
     if (!newGroupName.trim() || selectedGroupMembers.length === 0) {
       Alert.alert("Errore", "Inserisci un nome e seleziona almeno un amico");
       return;
     }
-    
-    const newGroup = {
-      id: Math.max(...groups.map(g => g.id), 0) + 1,
-      name: newGroupName,
-      avatar: "👥",
-      members: selectedGroupMembers,
-      color: ["#6D5BFF", "#3B82F6", "#EC4899", "#F59E0B"][Math.floor(Math.random() * 4)],
-      createdAt: new Date(),
-    };
+    try {
+      const created = await createFriendGroup({
+        name: newGroupName,
+        member_ids: selectedGroupMembers.map((id) => String(id)),
+      });
 
-    setGroups([...groups, newGroup]);
-    setNewGroupName("");
-    setSelectedGroupMembers([]);
-    setShowCreateGroupModal(false);
-    Alert.alert("✅ Gruppo creato!", `"${newGroupName}" è stato creato!`);
+      setGroups((prev) => [
+        {
+          id: created.id,
+          name: created.name,
+          avatar: "👥",
+          members: created.members?.map((m: any) => m.user?.id) ?? [],
+          color: "#6D5BFF",
+          createdAt: new Date(),
+        },
+        ...prev,
+      ]);
+      setNewGroupName("");
+      setSelectedGroupMembers([]);
+      setShowCreateGroupModal(false);
+      Alert.alert("✅ Gruppo creato!", `"${newGroupName}" è stato creato!`);
+    } catch {
+      Alert.alert("Errore", "Impossibile creare il gruppo");
+    }
   };
 
-  const handleAddMemberToGroup = (friendId: number, friendName: string) => {
-    if (selectedGroup.members.includes(friendId)) {
+  const handleAddMemberToGroup = async (friendId: number | string, friendName: string) => {
+    const memberId = String(friendId);
+    if (selectedGroup.members.includes(memberId)) {
       Alert.alert("Avviso", `${friendName} è già nel gruppo`);
       return;
     }
-
-    const updatedGroups = groups.map(g => 
-      g.id === selectedGroup.id 
-        ? { ...g, members: [...g.members, friendId] }
-        : g
-    );
-    setGroups(updatedGroups);
-    setSelectedGroup({ ...selectedGroup, members: [...selectedGroup.members, friendId] });
-    Alert.alert("✅ Aggiunto!", `${friendName} è stato aggiunto al gruppo`);
+    try {
+      await addFriendGroupMember(String(selectedGroup.id), memberId);
+      const updatedGroups = groups.map(g => 
+        g.id === selectedGroup.id 
+          ? { ...g, members: [...g.members, memberId] }
+          : g
+      );
+      setGroups(updatedGroups);
+      setSelectedGroup({ ...selectedGroup, members: [...selectedGroup.members, memberId] });
+      Alert.alert("✅ Aggiunto!", `${friendName} è stato aggiunto al gruppo`);
+    } catch {
+      Alert.alert("Errore", "Impossibile aggiungere al gruppo");
+    }
   };
 
   const renderFriendCard = ({ item, section }: any) => {
     if (section?.type === "requests") {
       return (
-        <View style={styles.requestCard}>
+        <TouchableOpacity
+          style={styles.requestCard}
+          activeOpacity={0.8}
+          onPress={() => openRequestProfile(item)}
+        >
           <View style={styles.requestContent}>
             <Text style={styles.avatar}>{item.avatar}</Text>
             <View style={styles.requestInfo}>
@@ -236,12 +439,16 @@ export default function FriendsTab() {
               <Feather name="x" size={18} color="white" />
             </TouchableOpacity>
           </View>
-        </View>
+        </TouchableOpacity>
       );
     }
 
     return (
-      <TouchableOpacity style={[styles.friendCard, !section?.isOnline && styles.friendCardOffline]} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={[styles.friendCard, !section?.isOnline && styles.friendCardOffline]}
+        activeOpacity={0.7}
+        onPress={() => openFriendProfile(item)}
+      >
         <View style={styles.friendContent}>
           <View style={styles.avatarContainer}>
             <Text style={styles.avatar}>{item.avatar}</Text>
@@ -259,12 +466,6 @@ export default function FriendsTab() {
               <Text style={styles.offlineText}>Visto {item.lastSeen}</Text>
             )}
           </View>
-        </View>
-
-        <View style={styles.actions}>
-          <TouchableOpacity style={styles.actionButton}>
-            <Feather name="message-circle" size={20} color={theme.colors.primary} />
-          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     );
@@ -360,8 +561,9 @@ export default function FriendsTab() {
           <Text style={styles.subtitle}>Condividi i momenti</Text>
         </View>
         <TouchableOpacity 
-          style={styles.addButton}
+          style={[styles.addButton, { shadowColor: theme.colors.primary }]}
           onPress={() => setShowSearchModal(true)}
+          activeOpacity={0.8}
         >
           <Feather name="user-plus" size={24} color="white" />
         </TouchableOpacity>
@@ -399,26 +601,54 @@ export default function FriendsTab() {
 
       {/* Content */}
       {activeTab === "friends" ? (
-        <SectionList
-          sections={friendsSections as any}
-          keyExtractor={(item, index) => item.id.toString() + index}
-          renderItem={({ item, section }) => renderFriendCard({ item, section })}
-          renderSectionHeader={renderSectionHeader}
-          scrollEnabled={true}
-          style={styles.friendsList}
-          contentContainerStyle={[styles.listContainer, { paddingBottom: bottomActionOffset + 80 }]}
-          showsVerticalScrollIndicator={false}
-        />
+        loadingFriends || loadingRequests ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={styles.emptyTitle}>Caricamento amici</Text>
+            <Text style={styles.emptyText}>Sto aggiornando la tua lista</Text>
+          </View>
+        ) : friendsSections.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Feather name="users" size={48} color={theme.colors.border} />
+            <Text style={styles.emptyTitle}>Nessun amico ancora</Text>
+            <Text style={styles.emptyText}>Cerca un amico per iniziare</Text>
+          </View>
+        ) : (
+          <SectionList
+            sections={friendsSections as any}
+            keyExtractor={(item, index) => item.id.toString() + index}
+            renderItem={({ item, section }) => renderFriendCard({ item, section })}
+            renderSectionHeader={renderSectionHeader}
+            scrollEnabled={true}
+            style={styles.friendsList}
+            contentContainerStyle={[styles.listContainer, { paddingBottom: bottomActionOffset + 80 }]}
+            showsVerticalScrollIndicator={false}
+          />
+        )
       ) : (
         <View style={styles.groupsContainer}>
-          <FlatList
-            data={groups}
-            renderItem={renderGroupCard}
-            keyExtractor={(item) => item.id.toString()}
-            contentContainerStyle={[styles.groupsList, { paddingBottom: bottomActionOffset + 24 }]}
-            style={styles.groupsListContainer}
-            scrollEnabled={true}
-          />
+          {loadingGroups ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="large" color={theme.colors.primary} />
+              <Text style={styles.emptyTitle}>Caricamento gruppi</Text>
+              <Text style={styles.emptyText}>Un attimo e ci siamo</Text>
+            </View>
+          ) : groups.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Feather name="users" size={48} color={theme.colors.border} />
+              <Text style={styles.emptyTitle}>Crea il tuo primo gruppo</Text>
+              <Text style={styles.emptyText}>Invita amici e organizza serate</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={groups}
+              renderItem={renderGroupCard}
+              keyExtractor={(item) => item.id.toString()}
+              contentContainerStyle={[styles.groupsList, { paddingBottom: bottomActionOffset + 24 }]}
+              style={styles.groupsListContainer}
+              scrollEnabled={true}
+            />
+          )}
           <TouchableOpacity 
             style={[styles.createGroupButtonFloating, { bottom: bottomActionOffset }]}
             onPress={() => setShowCreateGroupModal(true)}
@@ -461,7 +691,12 @@ export default function FriendsTab() {
               )}
             </View>
 
-            {searchedUsers.length > 0 ? (
+            {loadingSearch ? (
+              <View style={styles.noResultsContainer}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+                <Text style={styles.noResultsText}>Ricerca in corso...</Text>
+              </View>
+            ) : searchedUsers.length > 0 ? (
               <View style={styles.resultsContainer}>
                 <FlatList
                   data={searchedUsers}
@@ -545,10 +780,51 @@ export default function FriendsTab() {
             </View>
 
             <View style={styles.profileAction}>
-              {selectedProfile?.isFriend ? (
-                <TouchableOpacity style={[styles.actionButtonLarge, styles.alreadyFriendButton]}>
-                  <Feather name="check" size={20} color="white" />
-                  <Text style={styles.actionButtonText}>Già amico</Text>
+              {selectedProfile?.requestId ? (
+                <View style={styles.requestInlineActions}>
+                  <TouchableOpacity 
+                    style={[styles.actionButtonLarge, styles.acceptButton]}
+                    onPress={() => handleAcceptFriendRequest(selectedProfile.requestId, selectedProfile.name)}
+                  >
+                    <Feather name="check" size={20} color="white" />
+                    <Text style={styles.actionButtonText}>Accetta</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.actionButtonLarge, styles.rejectButton]}
+                    onPress={() => handleRejectFriendRequest(selectedProfile.requestId, selectedProfile.name)}
+                  >
+                    <Feather name="x" size={20} color="white" />
+                    <Text style={styles.actionButtonText}>Rifiuta</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : selectedProfile?.isFriend ? (
+                <TouchableOpacity 
+                  style={[styles.actionButtonLarge, styles.removeFriendButton]}
+                  onPress={() => {
+                    Alert.alert(
+                      "Rimuovere amico",
+                      `Vuoi rimuovere ${selectedProfile?.name}?`,
+                      [
+                        { text: "Annulla", style: "cancel" },
+                        {
+                          text: "Rimuovi",
+                          style: "destructive",
+                          onPress: async () => {
+                            try {
+                              await removeFriend(String(selectedProfile?.id));
+                              setFriends((prev) => prev.filter((f) => f.id !== selectedProfile?.id));
+                              setSelectedProfile(null);
+                            } catch {
+                              Alert.alert("Errore", "Impossibile rimuovere l'amico");
+                            }
+                          },
+                        },
+                      ]
+                    );
+                  }}
+                >
+                  <Feather name="user-x" size={20} color="white" />
+                  <Text style={styles.actionButtonText}>Rimuovi amico</Text>
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity 
@@ -1370,6 +1646,20 @@ const createStyles = (theme: any) => StyleSheet.create({
     color: theme.colors.text,
     fontSize: 16,
     fontWeight: "800",
+  },
+
+  requestInlineActions: {
+    flexDirection: "row",
+    gap: 12,
+  },
+
+  removeFriendButton: {
+    backgroundColor: theme.colors.error,
+    shadowColor: theme.colors.error,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
 
   // Tabs

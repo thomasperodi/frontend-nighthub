@@ -4,12 +4,10 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   Image,
   Modal,
   ScrollView,
   TextInput,
-  ActivityIndicator,
   Animated,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -17,6 +15,13 @@ import * as Location from "expo-location";
 import MapView, { Marker, UrlTile, PROVIDER_DEFAULT } from "react-native-maps";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { MOCK_EVENTS } from "../../../data/mockEvents";
+import { fetchVenues } from "../../../services/venues";
+import type { Venue as ApiVenue } from "../../../types/events";
+import {
+  getLastStoredLocation,
+  persistLocationUpdate,
+  startVenueGeofencing,
+} from "../../../services/locationTracking";
 
 interface MapTabProps {
   onEventPress?: (event: any) => void;
@@ -37,9 +42,9 @@ interface Venue {
   latitude: number;
   longitude: number;
   color: string;
-  events: number[];
-  capacity: number;
-  rating: number;
+  events?: number[];
+  capacity?: number;
+  rating?: number;
 }
 
 interface FriendGroup {
@@ -156,6 +161,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
   const mapInitializedRef = useRef(false); // Track if map was already initialized
   const [mapRegion, setMapRegion] = useState<any>(null); // Store initial map region only
   const currentZoomRef = useRef(0.08); // Ref per tracciare lo zoom senza causare re-render
+  const [apiVenues, setApiVenues] = useState<ApiVenue[]>([]);
 
   // Animation refs per gli amici
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -245,6 +251,40 @@ export default function MapTab({ onEventPress }: MapTabProps) {
     },
   ];
 
+  const venuePalette = [
+    "#facc15",
+    "#ec4899",
+    "#22c55e",
+    "#06b6d4",
+    "#f59e0b",
+    "#8b5cf6",
+  ];
+
+  const venues = useMemo<Venue[]>(() => {
+    if (!apiVenues.length) return mockVenues;
+
+    const mapped = apiVenues
+      .map((venue, index) => {
+        const latitude = Number(venue.latitude);
+        const longitude = Number(venue.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          return null;
+        }
+
+        return {
+          id: venue.id,
+          name: venue.name,
+          latitude,
+          longitude,
+          color: venuePalette[index % venuePalette.length],
+          capacity: venue.capacity ?? undefined,
+        } as Venue;
+      })
+      .filter((venue): venue is Venue => Boolean(venue));
+
+    return mapped.length ? mapped : mockVenues;
+  }, [apiVenues]);
+
   // Animazione pulse per venue con molti amici
   useEffect(() => {
     const animation = Animated.loop(
@@ -278,11 +318,37 @@ export default function MapTab({ onEventPress }: MapTabProps) {
 
   // Get user location on mount
   useEffect(() => {
-    (async () => {
+    let subscription: Location.LocationSubscription | null = null;
+
+    const loadLocation = async () => {
       try {
+        const stored = await getLastStoredLocation();
+        if (stored?.coords) {
+          setUserLocation(stored.coords);
+
+          if (!mapInitializedRef.current) {
+            setMapRegion({
+              ...stored.coords,
+              latitudeDelta: 0.025,
+              longitudeDelta: 0.025,
+            });
+            mapInitializedRef.current = true;
+
+            if (mapRef.current) {
+              mapRef.current.animateToRegion(
+                {
+                  ...stored.coords,
+                  latitudeDelta: 0.025,
+                  longitudeDelta: 0.025,
+                },
+                800
+              );
+            }
+          }
+        }
+
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
-          console.log("Permission to access location was denied");
           return;
         }
 
@@ -296,13 +362,14 @@ export default function MapTab({ onEventPress }: MapTabProps) {
         };
 
         setUserLocation(coords);
+        await persistLocationUpdate(location);
 
         // Inizializza la mappa UNA SOLA VOLTA con la posizione dell'utente
         if (!mapInitializedRef.current) {
           setMapRegion({
             ...coords,
-            latitudeDelta: 0.08,
-            longitudeDelta: 0.08,
+            latitudeDelta: 0.025,
+            longitudeDelta: 0.025,
           });
           mapInitializedRef.current = true;
 
@@ -311,24 +378,148 @@ export default function MapTab({ onEventPress }: MapTabProps) {
             mapRef.current.animateToRegion(
               {
                 ...coords,
-                latitudeDelta: 0.08,
-                longitudeDelta: 0.08,
+                latitudeDelta: 0.025,
+                longitudeDelta: 0.025,
               },
               1000
             );
           }
         }
+
+        subscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            timeInterval: 5000,
+            distanceInterval: 15,
+          },
+          async (update) => {
+            const fresh = {
+              latitude: update.coords.latitude,
+              longitude: update.coords.longitude,
+            };
+            setUserLocation(fresh);
+            await persistLocationUpdate(update);
+          }
+        );
       } catch (err) {
-        console.log("Error getting location:", err);
       }
-    })();
+    };
+
+    loadLocation();
+
+    return () => {
+      subscription?.remove();
+    };
   }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const getVenuesRegion = (items: { latitude: number; longitude: number }[]) => {
+      if (!items.length) return null;
+      const lats = items.map((r) => r.latitude);
+      const lons = items.map((r) => r.longitude);
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLon = Math.min(...lons);
+      const maxLon = Math.max(...lons);
+
+      const centerLat = (minLat + maxLat) / 2;
+      const centerLon = (minLon + maxLon) / 2;
+      const latDelta = Math.max(0.02, (maxLat - minLat) * 1.6);
+      const lonDelta = Math.max(0.02, (maxLon - minLon) * 1.6);
+
+      return {
+        latitude: centerLat,
+        longitude: centerLon,
+        latitudeDelta: latDelta,
+        longitudeDelta: lonDelta,
+      };
+    };
+
+    const loadGeofences = async () => {
+      try {
+        const venues = await fetchVenues();
+        if (!isActive) return;
+        setApiVenues(Array.isArray(venues) ? venues : []);
+
+        const regions = venues
+          .map((venue) => {
+            const latitude = Number(venue.latitude);
+            const longitude = Number(venue.longitude);
+            if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+              return null;
+            }
+            return {
+              identifier: venue.id,
+              latitude,
+              longitude,
+              radius: 100,
+            };
+          })
+          .filter((region): region is {
+            identifier: string;
+            latitude: number;
+            longitude: number;
+            radius: number;
+          } => Boolean(region));
+
+        if (regions.length > 0) {
+          await startVenueGeofencing(regions);
+        }
+
+        if (!mapInitializedRef.current && !userLocation) {
+          const region = getVenuesRegion(regions);
+          if (region) {
+            setMapRegion(region);
+            mapInitializedRef.current = true;
+
+            if (mapRef.current) {
+              mapRef.current.animateToRegion(region, 800);
+            }
+          }
+        }
+      } catch {
+        // Ignore to avoid blocking the map UI.
+      }
+    };
+
+    loadGeofences();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const handleRecenter = () => {
+    if (!userLocation || !mapRef.current) return;
+    mapRef.current.animateToRegion(
+      {
+        ...userLocation,
+        latitudeDelta: 0.025,
+        longitudeDelta: 0.025,
+      },
+      600
+    );
+  };
+
+  const venueMeta = (venue?: Venue | null) => {
+    if (!venue) return "";
+    const parts: string[] = [];
+    if (venue.rating !== undefined && venue.rating !== null) {
+      parts.push(`⭐ ${venue.rating}`);
+    }
+    if (venue.capacity !== undefined && venue.capacity !== null) {
+      parts.push(`${venue.capacity} posti`);
+    }
+    return parts.join(" • ");
+  };
 
   // Group friends by venue (solo se effettivamente nel locale)
   const friendsByVenue = useMemo(() => {
     const grouped: { [key: string]: Friend[] } = {};
     mockFriends.forEach((friend) => {
-      const venue = mockVenues.find((v) => v.name === friend.venue);
+      const venue = venues.find((v) => v.name === friend.venue);
       if (venue && isFriendInVenue(friend, venue)) {
         if (!grouped[friend.venue]) {
           grouped[friend.venue] = [];
@@ -337,16 +528,16 @@ export default function MapTab({ onEventPress }: MapTabProps) {
       }
     });
     return grouped;
-  }, []);
+  }, [venues]);
 
   // Raggruppa amici per localizzazione
   const friendGroups = useMemo(() => {
     const groups = groupFriendsByVenue(
       mockFriends.filter((f) => {
-        const venue = mockVenues.find((v) => v.name === f.venue);
+        const venue = venues.find((v) => v.name === f.venue);
         return venue && isFriendInVenue(f, venue);
       }),
-      mockVenues
+      venues
     );
     // Filtra solo i gruppi con coordinate valide
     return groups.filter(
@@ -357,12 +548,12 @@ export default function MapTab({ onEventPress }: MapTabProps) {
         group.longitude !== undefined &&
         group.friends.length > 0
     );
-  }, []);
+  }, [venues]);
 
   // Crea cluster di zone quando zoomato out
   const zoneClusters = useMemo(() => {
-    return createZoneClusters(mockVenues, friendsByVenue);
-  }, [friendsByVenue]);
+    return createZoneClusters(venues, friendsByVenue);
+  }, [friendsByVenue, venues]);
 
   // Determina se mostrare cluster o marker singoli (zoom > 0.10 = cluster, zoom <= 0.10 = marker dettagliati)
   // 0.10 = visuale a livello di città (50-100km), mostra locali e amici in dettaglio
@@ -370,9 +561,9 @@ export default function MapTab({ onEventPress }: MapTabProps) {
 
   // Get events for a venue
   const getVenueEvents = (venueId: string) => {
-    const venue = mockVenues.find((v) => v.id === venueId);
-    if (!venue) return [];
-    return MOCK_EVENTS.filter((e) => venue.events.includes(parseInt(e.id)));
+    const venue = venues.find((v) => v.id === venueId);
+    if (!venue || !venue.events || venue.events.length === 0) return [];
+    return MOCK_EVENTS.filter((e) => venue.events?.includes(parseInt(e.id)));
   };
 
   // Get friends at a venue
@@ -396,7 +587,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
     let filteredFriends: Friend[] = [];
 
     if (filter === "all" || filter === "venues") {
-      filteredVenues = mockVenues.filter((v) =>
+      filteredVenues = venues.filter((v) =>
         v.name.toLowerCase().includes(lowerQuery)
       );
     }
@@ -465,18 +656,24 @@ export default function MapTab({ onEventPress }: MapTabProps) {
   };
 
   return (
-    <View style={{ flex: 1, marginTop: 12 }}>
+    <View style={{ flex: 1, marginTop: 12, paddingBottom: 12 }}>
       {/* Titolo e Filtri */}
-      <View style={{ paddingHorizontal: 4, marginBottom: 12 }}>
-        <Text style={[styles.placeholderTitle, { color: theme.colors.text, marginBottom: 12 }]}>
-          Mappa
-        </Text>
+      <View style={{ paddingHorizontal: 18, marginBottom: 12 }}>
+        <View style={{ marginBottom: 12 }}>
+          <Text style={[styles.placeholderTitle, { color: theme.colors.text }]}>
+            Mappa
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 4, fontWeight: '500' }}>
+            Trova locali e amici vicino a te
+          </Text>
+        </View>
 
         {/* Filtri */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={{ marginBottom: 12, marginLeft: -4 }}
+          style={{ marginBottom: 12 }}
+          contentContainerStyle={{ paddingRight: 4 }}
         >
           {["all", "venues", "friends"].map((filter) => (
             <TouchableOpacity
@@ -612,7 +809,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
                   👥 Amici ({filteredFriends.length})
                 </Text>
                 {filteredFriends.map((friend) => {
-                  const venue = mockVenues.find((v) => v.name === friend.venue);
+                  const venue = venues.find((v) => v.name === friend.venue);
                   const inVenue = venue && isFriendInVenue(friend, venue);
 
                   return (
@@ -665,6 +862,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
           height: isSearching ? 250 : undefined,
           borderRadius: 20,
           overflow: "hidden",
+          position: "relative",
           backgroundColor: theme.colors.card,
           shadowColor: "#000",
           shadowOffset: { width: 0, height: 4 },
@@ -672,6 +870,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
           shadowRadius: 8,
           elevation: 5,
           marginHorizontal: 4,
+          marginBottom: 90,
         }}
       >
         <MapView
@@ -682,8 +881,8 @@ export default function MapTab({ onEventPress }: MapTabProps) {
             mapRegion || {
               latitude: 45.4642,
               longitude: 9.1900,
-              latitudeDelta: 0.08,
-              longitudeDelta: 0.08,
+              latitudeDelta: 0.025,
+              longitudeDelta: 0.025,
             }
           }
           onRegionChangeComplete={(region) => {
@@ -812,7 +1011,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
                   </Marker>
                 ))
               : // Mostra marker singoli quando zoomato in
-                mockVenues
+                venues
                   .filter((venue) => venue && venue.latitude != null && venue.longitude != null)
                   .map((venue) => {
                   const friendCount = getCountFriendsAtVenue(venue.name);
@@ -1113,6 +1312,23 @@ export default function MapTab({ onEventPress }: MapTabProps) {
               );
             })}
         </MapView>
+
+        <View style={styles.mapControls}>
+          <TouchableOpacity
+            onPress={handleRecenter}
+            disabled={!userLocation}
+            style={[
+              styles.mapControlButton,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                opacity: userLocation ? 1 : 0.6,
+              },
+            ]}
+          >
+            <Feather name="navigation" size={18} color={theme.colors.text} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* MODAL PER MOSTRARE EVENTO E AMICI NEL LOCALE */}
@@ -1171,7 +1387,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
                   </Text>
                 </View>
                 <Text style={{ fontSize: 12, color: theme.colors.muted, marginLeft: 35 }}>
-                  ⭐ {selectedVenue?.rating} • {selectedVenue?.capacity} posti
+                  {venueMeta(selectedVenue)}
                 </Text>
               </View>
               <TouchableOpacity
@@ -1324,9 +1540,8 @@ export default function MapTab({ onEventPress }: MapTabProps) {
 
 const styles = StyleSheet.create({
   placeholderTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: "800",
-    marginBottom: 6,
   },
   filterButton: {
     paddingHorizontal: 16,
@@ -1401,5 +1616,23 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 2,
     borderColor: "#fff",
+  },
+  mapControls: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+  },
+  mapControlButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 6,
   },
 });

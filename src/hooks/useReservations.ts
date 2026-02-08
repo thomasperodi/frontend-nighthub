@@ -13,7 +13,9 @@ import { useAuth } from '../providers/AuthProvider';
  */
 export function useReservations() {
   const { user } = useAuth();
-  return useAsync(() => fetchReservations(user?.id), { deps: [user?.id] });
+  // Backend scopes reservations to the authenticated user for client role.
+  // For venue/staff, use event-scoped APIs instead.
+  return useAsync(() => fetchReservations(), { deps: [user?.id] });
 }
 
 /**

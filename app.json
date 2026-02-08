@@ -2,7 +2,7 @@
   "expo": {
     "name": "NightHub",
     "slug": "frontend-app",
-    "version": "1.0.3",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -18,16 +18,24 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Permette di scattare foto e scansionare contenuti per completare azioni nell'app.",
-        "NSPhotoLibraryUsageDescription": "Permette di selezionare foto dalla libreria per completare azioni nell'app.",
-        "NSPhotoLibraryAddUsageDescription": "Permette di salvare contenuti nella libreria foto.",
-        "NSLocationWhenInUseUsageDescription": "Usiamo la posizione per mostrare locali ed eventi nelle vicinanze e migliorare l'esperienza."
+        "NSCameraUsageDescription": "Consente di usare la fotocamera per scansionare i QR code degli eventi e delle promozioni all’interno dell’app.",
+        "NSPhotoLibraryUsageDescription": "Consente di selezionare immagini dalla libreria per caricare le locandine degli eventi pubblicati nell’app.",
+        "NSPhotoLibraryAddUsageDescription": "Consente di salvare nella libreria immagini delle locandine o dei contenuti evento generati dall’app.",
+        "NSLocationWhenInUseUsageDescription": "Usiamo la posizione per mostrare locali ed eventi nelle vicinanze e migliorare l'esperienza.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Usiamo la posizione anche in background per aggiornare la mappa e mostrarti locali e amici vicini.",
+        "NSLocationAlwaysUsageDescription": "Usiamo la posizione anche in background per aggiornare la mappa e mostrarti locali e amici vicini.",
+        "UIBackgroundModes": ["location"]
       }
     },
     "android": {
       "package": "com.perodithomas.nighthub",
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

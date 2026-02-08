@@ -11,7 +11,7 @@ import { UserPromo } from '../types/users';
  * Fetch all promos
  */
 export async function fetchPromos(): Promise<Promo[]> {
-  const { data } = await api.get(API_ENDPOINTS.PROMOS.LIST);
+  const { data } = await api.get(API_ENDPOINTS.PROMOS.ACTIVE_LIST);
   return data;
 }
 

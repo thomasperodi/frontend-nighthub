@@ -18,8 +18,7 @@ import {
 import { useTheme } from "../theme/ThemeProvider";
 import { listVenueTables } from "../services/tables";
 import type { VenueTable } from "../types/tables";
-import { fetchReservationsByEvent } from "../services/reservations";
-import type { Reservation } from "../types/reservations";
+import { fetchBookedTableIdsByEvent } from "../services/reservations";
 
 function asNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -58,27 +57,11 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
 
   const bookedSet = useMemo(() => new Set(bookedTableIds), [bookedTableIds]);
 
-  const computeBookedTableIds = (reservations: Reservation[]): string[] => {
-    const set = new Set<string>();
-    for (const r of reservations) {
-      if (r?.type !== 'table') continue;
-      const tableId = r?.venue_table_id ?? r?.venue_table?.id;
-      if (!tableId) continue;
-
-      const st = String(r?.status ?? '').trim().toLowerCase();
-      // Se è stata annullata, il tavolo torna prenotabile.
-      if (st === 'cancelled') continue;
-
-      set.add(tableId);
-    }
-    return Array.from(set);
-  };
-
   const isTableAvailableNow = async (tableId: string): Promise<boolean> => {
     if (!eventId) return false;
     try {
-      const reservations = await fetchReservationsByEvent(eventId);
-      const booked = new Set(computeBookedTableIds(Array.isArray(reservations) ? reservations : []));
+      const bookedIds = await fetchBookedTableIdsByEvent(eventId);
+      const booked = new Set(Array.isArray(bookedIds) ? bookedIds : []);
       return !booked.has(tableId);
     } catch {
       // In caso di errore rete, blocco la prenotazione per evitare overbooking.
@@ -141,15 +124,14 @@ export default function TableBookingModal({ visible, onClose, event, onBooked }:
 
       const [tablesRes, reservationsRes] = await Promise.allSettled([
         listVenueTables(venueId),
-        fetchReservationsByEvent(eventId),
+        fetchBookedTableIdsByEvent(eventId),
       ]);
 
       const allTables: VenueTable[] =
         tablesRes.status === 'fulfilled' && Array.isArray(tablesRes.value) ? tablesRes.value : [];
-      const reservations: Reservation[] =
-        reservationsRes.status === 'fulfilled' && Array.isArray(reservationsRes.value) ? reservationsRes.value : [];
 
-      const booked = computeBookedTableIds(reservations);
+      const booked: string[] =
+        reservationsRes.status === 'fulfilled' && Array.isArray(reservationsRes.value) ? reservationsRes.value : [];
       const bookedIdSet = new Set(booked);
       const availableTables = allTables.filter((t) => !bookedIdSet.has(t.id));
 

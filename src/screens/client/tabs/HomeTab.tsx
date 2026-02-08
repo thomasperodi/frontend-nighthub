@@ -352,71 +352,77 @@ export default function HomeTab({
         <SearchBar value={query} onChange={onQueryChange} onOpenFilters={onOpenFilters} />
 
         {(eventsLoading || promosLoading || venuesLoading) && !eventsUi.length ? (
-          <View style={{ paddingVertical: 16, alignItems: 'center' }}>
-            <ActivityIndicator />
-            <Text style={{ marginTop: 8, color: theme.colors.muted }}>Caricamento eventi…</Text>
+          <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={{ marginTop: 12, color: theme.colors.muted, fontSize: 14, fontWeight: '500' }}>Caricamento eventi…</Text>
           </View>
         ) : null}
 
         {(eventsError || promosError || venuesError) ? (
-          <View style={{ paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, backgroundColor: theme.colors.card, borderWidth: 1, borderColor: theme.colors.border, marginTop: 10 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Errore nel caricamento</Text>
-            <Text style={{ color: theme.colors.muted, marginTop: 4 }} numberOfLines={3}>
+          <View style={{ paddingVertical: 16, paddingHorizontal: 16, borderRadius: 16, backgroundColor: theme.colors.card, borderWidth: 1, borderColor: theme.colors.border, marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <Feather name="alert-circle" size={20} color={theme.colors.primary} />
+              <Text style={{ color: theme.colors.text, fontWeight: '700', marginLeft: 8, fontSize: 15 }}>Errore nel caricamento</Text>
+            </View>
+            <Text style={{ color: theme.colors.muted, marginTop: 4, fontSize: 13, lineHeight: 18 }} numberOfLines={3}>
               {eventsError || promosError || venuesError}
             </Text>
             <TouchableOpacity
               onPress={() => onRefresh()}
               accessibilityRole="button"
-              style={{ marginTop: 10, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: theme.colors.primary }}
+              style={{ marginTop: 12, paddingVertical: 12, borderRadius: 12, alignItems: 'center', backgroundColor: theme.colors.primary, flexDirection: 'row', justifyContent: 'center' }}
+              activeOpacity={0.8}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: '800' }}>Riprova</Text>
+              <Feather name="refresh-cw" size={16} color={theme.colors.text} />
+              <Text style={{ color: theme.colors.text, fontWeight: '800', marginLeft: 8, fontSize: 15 }}>Riprova</Text>
             </TouchableOpacity>
           </View>
         ) : null}
 
         <View style={styles.resultsRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={[styles.resultsText, { color: theme.colors.muted }]}>{filtered.length} risultati</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+            <Text style={[styles.resultsText, { color: theme.colors.text, fontWeight: '700' }]}>{filtered.length} {filtered.length === 1 ? 'risultato' : 'risultati'}</Text>
             {filters.onlyMyPromos && (
-              <View style={{ marginLeft: 8, paddingVertical: 4, paddingHorizontal: 8, backgroundColor: theme.colors.primary, borderRadius: 12 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Con le mie offerte</Text>
+              <View style={{ marginLeft: 8, paddingVertical: 4, paddingHorizontal: 10, backgroundColor: theme.colors.primary + '22', borderRadius: 12, borderWidth: 1, borderColor: theme.colors.primary + '44' }}>
+                <Text style={{ color: theme.colors.primary, fontWeight: '700', fontSize: 12 }}>Con le mie offerte</Text>
               </View>
             )}
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <TouchableOpacity
-              style={[styles.viewBtn, { backgroundColor: viewMode === 'list' ? theme.colors.primary + '22' : 'transparent' }]}
-              onPress={() => onToggleViewMode('list')}
-            >
-              <Feather name="list" size={16} color={viewMode === 'list' ? theme.colors.primary : theme.colors.muted} />
-            </TouchableOpacity>
+            <View style={[styles.viewModeContainer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <TouchableOpacity
+                style={[styles.viewBtn, { backgroundColor: viewMode === 'list' ? theme.colors.primary + '33' : 'transparent' }]}
+                onPress={() => onToggleViewMode('list')}
+                activeOpacity={0.7}
+              >
+                <Feather name="list" size={16} color={viewMode === 'list' ? theme.colors.primary : theme.colors.muted} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.viewBtn, { backgroundColor: viewMode === 'grid' ? theme.colors.primary + '33' : 'transparent' }]}
+                onPress={() => onToggleViewMode('grid')}
+                activeOpacity={0.7}
+              >
+                <Feather name="grid" size={16} color={viewMode === 'grid' ? theme.colors.primary : theme.colors.muted} />
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity
-              style={[styles.viewBtn, { backgroundColor: viewMode === 'grid' ? theme.colors.primary + '22' : 'transparent' }]}
-              onPress={() => onToggleViewMode('grid')}
-            >
-              <Feather name="grid" size={16} color={viewMode === 'grid' ? theme.colors.primary : theme.colors.muted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.sortBtn, { borderColor: theme.colors.border, backgroundColor: theme.colors.card, marginLeft: 8 }]}
+              style={[styles.sortBtn, { borderColor: theme.colors.border, backgroundColor: sortOrder !== 'none' ? theme.colors.primary + '22' : theme.colors.card }]}
               accessibilityRole="button"
               onPress={onToggleSort}
+              activeOpacity={0.7}
             >
               {sortOrder === 'asc' && <Feather name="chevron-up" size={16} color={theme.colors.primary} />}
               {sortOrder === 'desc' && <Feather name="chevron-down" size={16} color={theme.colors.primary} />}
               {sortOrder === 'none' && <Feather name="shuffle" size={16} color={theme.colors.muted} />}
-              <Text style={[styles.sortText, { color: sortOrder === 'none' ? theme.colors.muted : theme.colors.primary }]}>
+              <Text style={[styles.sortText, { color: sortOrder === 'none' ? theme.colors.muted : theme.colors.primary, fontWeight: '600' }]}>
                 {' '}{sortOrder === 'asc' ? 'A → Z' : sortOrder === 'desc' ? 'Z → A' : 'Ordina'}
               </Text>
             </TouchableOpacity>
           </View>
         </View>
-
-        <Text style={{ color: theme.colors.muted, marginTop: 8 }}>
-          Ordinamento: {sortOrder === 'none' ? 'Nessuno' : sortOrder === 'asc' ? 'A → Z' : 'Z → A'}
-        </Text>
       </View>
 
       {viewMode === 'list' && (
@@ -432,6 +438,7 @@ export default function HomeTab({
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
           ListEmptyComponent={() => (
             <View style={styles.empty}>
+              <Feather name="search" size={48} color={theme.colors.muted} style={{ opacity: 0.5 }} />
               <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>Nessun evento trovato</Text>
               <Text style={[styles.emptyText, { color: theme.colors.muted }]}>Prova a modificare i filtri o la ricerca</Text>
             </View>
@@ -452,6 +459,7 @@ export default function HomeTab({
           numColumns={2}
           ListEmptyComponent={() => (
             <View style={styles.empty}>
+              <Feather name="search" size={48} color={theme.colors.muted} style={{ opacity: 0.5 }} />
               <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>Nessun evento trovato</Text>
               <Text style={[styles.emptyText, { color: theme.colors.muted }]}>Prova a modificare i filtri o la ricerca</Text>
             </View>
@@ -472,6 +480,7 @@ export default function HomeTab({
           ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
           ListEmptyComponent={() => (
             <View style={styles.empty}>
+              <Feather name="search" size={48} color={theme.colors.muted} style={{ opacity: 0.5 }} />
               <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>Nessun evento trovato</Text>
               <Text style={[styles.emptyText, { color: theme.colors.muted }]}>Prova a modificare i filtri o la ricerca</Text>
             </View>
@@ -483,13 +492,14 @@ export default function HomeTab({
 }
 
 const styles = StyleSheet.create({
-  searchContainer: { paddingHorizontal: 18, paddingBottom: 8 },
-  resultsRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 4, marginTop: 6 },
-  resultsText: { fontSize: 13 },
-  sortBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1 },
-  sortText: { marginLeft: 8, fontWeight: "600" },
-  viewBtn: { padding: 8, borderRadius: 8, marginRight: 8 },
-  empty: { padding: 28, alignItems: "center" },
-  emptyTitle: { fontSize: 16, fontWeight: "700", marginBottom: 6 },
-  emptyText: { },
+  searchContainer: { paddingHorizontal: 18, paddingBottom: 12, paddingTop: 4 },
+  resultsRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 4, marginTop: 8 },
+  resultsText: { fontSize: 14 },
+  sortBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, marginLeft: 8 },
+  sortText: { marginLeft: 6, fontSize: 13 },
+  viewModeContainer: { flexDirection: "row", borderRadius: 12, borderWidth: 1, padding: 2 },
+  viewBtn: { padding: 8, borderRadius: 8 },
+  empty: { padding: 48, alignItems: "center" },
+  emptyTitle: { fontSize: 18, fontWeight: "700", marginTop: 16, marginBottom: 8 },
+  emptyText: { fontSize: 14, textAlign: "center", lineHeight: 20 },
 });

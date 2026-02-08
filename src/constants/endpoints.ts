@@ -46,6 +46,7 @@ export const API_ENDPOINTS = {
   // Promos
   PROMOS: {
     LIST: '/promos',
+    ACTIVE_LIST: '/promos/active',
     DETAIL: (id: string) => `/promos/${id}`,
     CREATE: '/promos',
     UPDATE: (id: string) => `/promos/${id}`,

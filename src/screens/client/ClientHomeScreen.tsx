@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Animated } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useNavigation } from '@react-navigation/native';
 import FilterModal from "../../components/FilterModal";
@@ -28,6 +28,7 @@ export default function ClientHomeScreen({ route }: any) {
   const [viewMode, setViewMode] = useState<'list' | 'grid' | 'compact'>('list');
   const [promoFilter, setPromoFilter] = useState<string | null>(null);
   const [userPromos, setUserPromos] = useState<string[]>([]);
+  const fadeAnim = React.useRef(new Animated.Value(1)).current;
 
   const clientItems: NavItem[] = [
     { key: "home", icon: "home", label: "Home" },
@@ -35,6 +36,7 @@ export default function ClientHomeScreen({ route }: any) {
     { key: "map", icon: "map", label: "Mappa" },
     { key: "profile", icon: "user", label: "Profilo" },
   ];
+
 
   useEffect(() => {
     (async () => {
@@ -49,43 +51,78 @@ export default function ClientHomeScreen({ route }: any) {
     }
   }, [route?.params?.promoFilter]);
 
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(fadeAnim, {
+        toValue: 0.7,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [currentTab]);
+
   const toggleSort = () => setSortOrder((s) => (s === 'none' ? 'asc' : s === 'asc' ? 'desc' : 'none'));
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Buongiorno";
+    if (hour < 18) return "Buon pomeriggio";
+    return "Buonasera";
+  };
 
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       edges={['top']}
     >
-      <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-        <Text style={[styles.greeting, { color: theme.colors.text }]}>Scopri le migliori serate</Text>
-        <TouchableOpacity onPress={toggleTheme} accessibilityRole="button" style={styles.themeBtn}>
-          <Feather name={isDark ? "moon" : "sun"} size={18} color={theme.colors.muted} />
-        </TouchableOpacity>
+      <View style={[styles.header, { borderBottomColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+        <View style={styles.headerContent}>
+          <View>
+            <Text style={[styles.greeting, { color: theme.colors.text }]}>{getGreeting()}</Text>
+            <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Scopri le migliori serate</Text>
+          </View>
+          <TouchableOpacity 
+            onPress={toggleTheme} 
+            accessibilityRole="button" 
+            style={[styles.themeBtn, { backgroundColor: theme.colors.card }]}
+            activeOpacity={0.7}
+          >
+            <Feather name={isDark ? "moon" : "sun"} size={18} color={theme.colors.primary} />
+          </TouchableOpacity>
+        </View>
+
       </View>
 
-      {currentTab === "home" && (
-        <HomeTab
-          query={query}
-          onQueryChange={setQuery}
-          onOpenFilters={() => setFiltersOpen(true)}
-          filters={filters}
-          userPromos={userPromos}
-          promoFilter={promoFilter}
-          sortOrder={sortOrder}
-          viewMode={viewMode}
-          onToggleSort={toggleSort}
-          onToggleViewMode={setViewMode}
-          onPromoFilterChange={setPromoFilter}
-          onFiltersChange={setFilters}
-          onEventPress={(item) => navigation.navigate('EventDetail', { item })}
-          onPromoPress={(promo) => navigation.navigate('PromoDetail', { promo })}
-          navigation={navigation}
-        />
-      )}
+      <Animated.View style={[styles.tabContent, { opacity: fadeAnim }]}>
+        {currentTab === "home" && (
+          <HomeTab
+            query={query}
+            onQueryChange={setQuery}
+            onOpenFilters={() => setFiltersOpen(true)}
+            filters={filters}
+            userPromos={userPromos}
+            promoFilter={promoFilter}
+            sortOrder={sortOrder}
+            viewMode={viewMode}
+            onToggleSort={toggleSort}
+            onToggleViewMode={setViewMode}
+            onPromoFilterChange={setPromoFilter}
+            onFiltersChange={setFilters}
+            onEventPress={(item) => navigation.navigate('EventDetail', { item })}
+            onPromoPress={(promo) => navigation.navigate('PromoDetail', { promo })}
+            navigation={navigation}
+          />
+        )}
 
-      {currentTab === "profile" && <ProfileTab navigation={navigation} />}
-      {currentTab === "friends" && <FriendsTab />}
-      {currentTab === "map" && <MapTab onEventPress={(item) => navigation.navigate('EventDetail', { item })} />}
+        {currentTab === "profile" && <ProfileTab navigation={navigation} />}
+        {currentTab === "friends" && <FriendsTab />}
+        {currentTab === "map" && <MapTab onEventPress={(item) => navigation.navigate('EventDetail', { item })} />}
+      </Animated.View>
 
       <FilterModal
         visible={filtersOpen}
@@ -101,7 +138,29 @@ export default function ClientHomeScreen({ route }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { padding: 18, borderBottomWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  greeting: { fontSize: 18, fontWeight: "700" },
-  themeBtn: { padding: 8, borderRadius: 10 },
+  header: { 
+    paddingHorizontal: 20, 
+    paddingTop: 12, 
+    paddingBottom: 16, 
+    borderBottomWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  headerContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  greeting: { fontSize: 24, fontWeight: "800", marginBottom: 2 },
+  subtitle: { fontSize: 14, fontWeight: "500" },
+  themeBtn: { 
+    padding: 10, 
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  tabContent: { flex: 1 },
 });
