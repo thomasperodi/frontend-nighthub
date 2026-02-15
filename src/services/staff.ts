@@ -63,6 +63,22 @@ export type StaffSale = {
   created_at?: string;
 };
 
+export type ScanEntryQrResult = {
+  success: boolean;
+  alreadyCheckedIn: boolean;
+  reservation?: {
+    id: string;
+    user_id: string;
+    event_id: string;
+    checked_in_at?: string | null;
+  };
+  entry?: {
+    id: string;
+    event_id: string;
+    user_id?: string | null;
+  };
+};
+
 function mapEntry(e: BackendEntry): StaffEntry {
   const entry_type: StaffEntry['entry_type'] =
     e.sesso === 'M' ? 'male' : e.sesso === 'F' ? 'female' : 'free';
@@ -99,6 +115,7 @@ function mapTableSale(s: BackendTableSale, eventId?: string): StaffSale {
 export async function recordEntry(input: {
   event_id: string;
   staff_id?: string;
+  user_id?: string;
   quantity?: number;
   entry_type?: 'male' | 'female' | 'free';
 }): Promise<{ success: boolean; created: number; stats: EventStats }>
@@ -115,6 +132,18 @@ export async function listEntries(eventId?: string): Promise<StaffEntry[]> {
     params: eventId ? { eventId } : undefined,
   });
   return (data ?? []).map(mapEntry);
+}
+
+export async function scanEntryQr(input: {
+  event_id: string;
+  qr_data: string;
+  staff_id?: string;
+}): Promise<ScanEntryQrResult> {
+  const { data } = await api.post<ScanEntryQrResult>(
+    API_ENDPOINTS.RESERVATIONS.SCAN_ENTRY_QR,
+    input,
+  );
+  return data;
 }
 
 export async function recordBarSale(input: {

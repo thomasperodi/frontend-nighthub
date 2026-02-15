@@ -333,6 +333,7 @@ export default function StaffHomeScreen() {
           openPrompt={openPrompt}
           eventId={eventId}
           staffId={user?.id}
+          venueId={user?.venue_id}
         />
       )}
       {role === "guardaroba" && (

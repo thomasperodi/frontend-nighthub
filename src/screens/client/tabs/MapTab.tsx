@@ -16,11 +16,11 @@ import MapView, { Marker, UrlTile, PROVIDER_DEFAULT } from "react-native-maps";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { MOCK_EVENTS } from "../../../data/mockEvents";
 import { fetchVenues } from "../../../services/venues";
-import type { Venue as ApiVenue } from "../../../types/events";
+import { fetchEventsByVenue } from "../../../services/events";
+import type { Event, Venue as ApiVenue } from "../../../types/events";
 import {
   getLastStoredLocation,
   persistLocationUpdate,
-  startVenueGeofencing,
 } from "../../../services/locationTracking";
 
 interface MapTabProps {
@@ -52,6 +52,15 @@ interface FriendGroup {
   longitude: number;
   friends: Friend[];
   venue: string;
+}
+
+interface VenueEvent {
+  id: string;
+  title: string;
+  date: string;
+  time?: string;
+  endTime?: string;
+  status?: string;
 }
 
 // Helper: calcola distanza tra due coordinate (km)
@@ -111,10 +120,20 @@ interface ZoneCluster {
 
 const createZoneClusters = (
   venues: Venue[],
-  friendsByVenue: { [key: string]: Friend[] }
+  friendsByVenue: { [key: string]: Friend[] },
+  zoomDelta: number
 ): ZoneCluster[] => {
-  // Divide la mappa in griglie di 0.05 gradi (approssimativamente 5km x 5km)
-  const gridSize = 0.05;
+  const getGridSizeForZoom = (delta: number): number => {
+    if (delta > 0.5) return 0.3;
+    if (delta > 0.2) return 0.18;
+    if (delta > 0.1) return 0.1;
+    if (delta > 0.06) return 0.06;
+    if (delta > 0.03) return 0.03;
+    if (delta > 0.018) return 0.015;
+    return 0.008;
+  };
+
+  const gridSize = getGridSizeForZoom(zoomDelta);
   const clusterMap: { [key: string]: ZoneCluster } = {};
 
   venues.forEach((venue) => {
@@ -124,8 +143,8 @@ const createZoneClusters = (
 
     if (!clusterMap[key]) {
       clusterMap[key] = {
-        latitude: gridLat + gridSize / 2,
-        longitude: gridLon + gridSize / 2,
+        latitude: venue.latitude,
+        longitude: venue.longitude,
         venuesCount: 0,
         friendsCount: 0,
         venues: [],
@@ -137,8 +156,155 @@ const createZoneClusters = (
     clusterMap[key].venues.push(venue);
   });
 
-  return Object.values(clusterMap);
+  return Object.values(clusterMap).map((cluster) => {
+    if (!cluster.venues.length) {
+      return cluster;
+    }
+
+    const sumLat = cluster.venues.reduce((acc, venue) => acc + venue.latitude, 0);
+    const sumLon = cluster.venues.reduce((acc, venue) => acc + venue.longitude, 0);
+
+    return {
+      ...cluster,
+      latitude: sumLat / cluster.venues.length,
+      longitude: sumLon / cluster.venues.length,
+    };
+  });
 };
+
+const IT_MONTH_TO_INDEX: Record<string, number> = {
+  gen: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  mag: 4,
+  giu: 5,
+  lug: 6,
+  ago: 7,
+  set: 8,
+  ott: 9,
+  nov: 10,
+  dic: 11,
+};
+
+const parseVenueEventDateTime = (event: VenueEvent): Date | null => {
+  if (!event?.date) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(event.date)) {
+    const [yearRaw, monthRaw, dayRaw] = event.date.split("-");
+    const year = Number.parseInt(yearRaw, 10);
+    const month = Number.parseInt(monthRaw, 10);
+    const day = Number.parseInt(dayRaw, 10);
+
+    const [hourRaw, minuteRaw] = (event.time || "00:00").split(":");
+    const hour = Number.parseInt(hourRaw, 10);
+    const minute = Number.parseInt(minuteRaw, 10);
+
+    const parsed = new Date(
+      year,
+      month - 1,
+      day,
+      Number.isFinite(hour) ? hour : 0,
+      Number.isFinite(minute) ? minute : 0,
+      0,
+      0
+    );
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const [dayRaw, monthRaw] = event.date.trim().split(/\s+/);
+  const day = Number.parseInt(dayRaw, 10);
+  const monthToken = (monthRaw || "").toLowerCase().slice(0, 3);
+  const month = IT_MONTH_TO_INDEX[monthToken];
+
+  if (!Number.isFinite(day) || month === undefined) {
+    return null;
+  }
+
+  const now = new Date();
+  const [hourRaw, minuteRaw] = (event.time || "00:00").split(":");
+  const hour = Number.parseInt(hourRaw, 10);
+  const minute = Number.parseInt(minuteRaw, 10);
+
+  const eventDate = new Date(
+    now.getFullYear(),
+    month,
+    day,
+    Number.isFinite(hour) ? hour : 0,
+    Number.isFinite(minute) ? minute : 0,
+    0,
+    0
+  );
+
+  return Number.isNaN(eventDate.getTime()) ? null : eventDate;
+};
+
+const splitActiveAndUpcomingEvents = (events: VenueEvent[]) => {
+  const now = new Date();
+  const activeWindowMs = 4 * 60 * 60 * 1000;
+  const normalizeStatus = (status?: string) => (status ?? "").trim().toUpperCase();
+
+  const withDate = events
+    .map((event) => ({
+      event,
+      startsAt: parseVenueEventDateTime(event),
+    }))
+    .filter((item) => Boolean(item.startsAt));
+
+  const active = withDate
+    .filter((item) => {
+      const st = normalizeStatus(item.event.status);
+      if (st === "LIVE") return true;
+      if (st === "CLOSED") return false;
+
+      const startsAt = item.startsAt as Date;
+      const [endHourRaw, endMinuteRaw] = (item.event.endTime || "").split(":");
+      const endHour = Number.parseInt(endHourRaw, 10);
+      const endMinute = Number.parseInt(endMinuteRaw, 10);
+
+      const endsAt =
+        Number.isFinite(endHour) && Number.isFinite(endMinute)
+          ? new Date(
+              startsAt.getFullYear(),
+              startsAt.getMonth(),
+              startsAt.getDate(),
+              endHour,
+              endMinute,
+              0,
+              0
+            )
+          : new Date(startsAt.getTime() + activeWindowMs);
+
+      if (endsAt.getTime() <= startsAt.getTime()) {
+        endsAt.setDate(endsAt.getDate() + 1);
+      }
+
+      return startsAt <= now && now <= endsAt;
+    })
+    .sort((a, b) => (a.startsAt as Date).getTime() - (b.startsAt as Date).getTime())
+    .map((item) => item.event);
+
+  const upcoming = withDate
+    .filter((item) => {
+      const st = normalizeStatus(item.event.status);
+      if (st === "CLOSED") return false;
+      if (st === "LIVE") return false;
+      return (item.startsAt as Date).getTime() > now.getTime() || st === "DRAFT";
+    })
+    .sort((a, b) => (a.startsAt as Date).getTime() - (b.startsAt as Date).getTime())
+    .map((item) => item.event);
+
+  return { active, upcoming };
+};
+
+const mapApiEventToVenueEvent = (event: Event): VenueEvent => ({
+  id: String(event.id),
+  title: event.name,
+  date: String(event.date ?? ""),
+  time: event.start_time ? String(event.start_time).slice(0, 5) : undefined,
+  endTime: event.end_time ? String(event.end_time).slice(0, 5) : undefined,
+  status: event.status,
+});
 
 export default function MapTab({ onEventPress }: MapTabProps) {
   const { theme } = useTheme();
@@ -162,6 +328,8 @@ export default function MapTab({ onEventPress }: MapTabProps) {
   const [mapRegion, setMapRegion] = useState<any>(null); // Store initial map region only
   const currentZoomRef = useRef(0.08); // Ref per tracciare lo zoom senza causare re-render
   const [apiVenues, setApiVenues] = useState<ApiVenue[]>([]);
+  const [venueEventsFromDb, setVenueEventsFromDb] = useState<VenueEvent[]>([]);
+  const [venueEventsLoading, setVenueEventsLoading] = useState(false);
 
   // Animation refs per gli amici
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -316,10 +484,35 @@ export default function MapTab({ onEventPress }: MapTabProps) {
     return distance < 0.1; // 100 metri
   };
 
+  const refreshUserLocation = async (): Promise<{
+    latitude: number;
+    longitude: number;
+  } | null> => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        return null;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const coords = {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      };
+
+      setUserLocation(coords);
+      await persistLocationUpdate(location);
+      return coords;
+    } catch {
+      return null;
+    }
+  };
+
   // Get user location on mount
   useEffect(() => {
-    let subscription: Location.LocationSubscription | null = null;
-
     const loadLocation = async () => {
       try {
         const stored = await getLastStoredLocation();
@@ -347,22 +540,10 @@ export default function MapTab({ onEventPress }: MapTabProps) {
           }
         }
 
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") {
+        const coords = await refreshUserLocation();
+        if (!coords) {
           return;
         }
-
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-
-        const coords = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        };
-
-        setUserLocation(coords);
-        await persistLocationUpdate(location);
 
         // Inizializza la mappa UNA SOLA VOLTA con la posizione dell'utente
         if (!mapInitializedRef.current) {
@@ -386,30 +567,11 @@ export default function MapTab({ onEventPress }: MapTabProps) {
           }
         }
 
-        subscription = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.Balanced,
-            timeInterval: 5000,
-            distanceInterval: 15,
-          },
-          async (update) => {
-            const fresh = {
-              latitude: update.coords.latitude,
-              longitude: update.coords.longitude,
-            };
-            setUserLocation(fresh);
-            await persistLocationUpdate(update);
-          }
-        );
       } catch (err) {
       }
     };
 
     loadLocation();
-
-    return () => {
-      subscription?.remove();
-    };
   }, []);
 
   useEffect(() => {
@@ -437,39 +599,24 @@ export default function MapTab({ onEventPress }: MapTabProps) {
       };
     };
 
-    const loadGeofences = async () => {
+    const loadVenues = async () => {
       try {
         const venues = await fetchVenues();
         if (!isActive) return;
         setApiVenues(Array.isArray(venues) ? venues : []);
-
-        const regions = venues
+        const coordinates = venues
           .map((venue) => {
             const latitude = Number(venue.latitude);
             const longitude = Number(venue.longitude);
             if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
               return null;
             }
-            return {
-              identifier: venue.id,
-              latitude,
-              longitude,
-              radius: 100,
-            };
+            return { latitude, longitude };
           })
-          .filter((region): region is {
-            identifier: string;
-            latitude: number;
-            longitude: number;
-            radius: number;
-          } => Boolean(region));
-
-        if (regions.length > 0) {
-          await startVenueGeofencing(regions);
-        }
+          .filter((item): item is { latitude: number; longitude: number } => Boolean(item));
 
         if (!mapInitializedRef.current && !userLocation) {
-          const region = getVenuesRegion(regions);
+          const region = getVenuesRegion(coordinates);
           if (region) {
             setMapRegion(region);
             mapInitializedRef.current = true;
@@ -484,18 +631,20 @@ export default function MapTab({ onEventPress }: MapTabProps) {
       }
     };
 
-    loadGeofences();
+    loadVenues();
 
     return () => {
       isActive = false;
     };
   }, []);
 
-  const handleRecenter = () => {
-    if (!userLocation || !mapRef.current) return;
+  const handleRecenter = async () => {
+    if (!mapRef.current) return;
+    const coords = await refreshUserLocation();
+    if (!coords) return;
     mapRef.current.animateToRegion(
       {
-        ...userLocation,
+        ...coords,
         latitudeDelta: 0.025,
         longitudeDelta: 0.025,
       },
@@ -552,19 +701,67 @@ export default function MapTab({ onEventPress }: MapTabProps) {
 
   // Crea cluster di zone quando zoomato out
   const zoneClusters = useMemo(() => {
-    return createZoneClusters(venues, friendsByVenue);
-  }, [friendsByVenue, venues]);
+    return createZoneClusters(venues, friendsByVenue, mapZoom);
+  }, [friendsByVenue, mapZoom, venues]);
 
-  // Determina se mostrare cluster o marker singoli (zoom > 0.10 = cluster, zoom <= 0.10 = marker dettagliati)
-  // 0.10 = visuale a livello di città (50-100km), mostra locali e amici in dettaglio
-  const showClusters = mapZoom > 0.12;
+  // Determina se mostrare cluster o marker singoli.
+  // I cluster restano attivi finché non siamo molto vicini, così si "aprono" gradualmente in più zone.
+  const showClusters = mapZoom > 0.018;
 
   // Get events for a venue
-  const getVenueEvents = (venueId: string) => {
+  const getVenueEvents = (venueId?: string): VenueEvent[] => {
+    if (!venueId) return [];
     const venue = venues.find((v) => v.id === venueId);
     if (!venue || !venue.events || venue.events.length === 0) return [];
-    return MOCK_EVENTS.filter((e) => venue.events?.includes(parseInt(e.id)));
+    return MOCK_EVENTS.filter((e) => venue.events?.includes(parseInt(e.id))).map((e) => ({
+      id: String(e.id),
+      title: e.title,
+      date: e.date,
+      time: e.time,
+    }));
   };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadVenueEventsFromDb = async () => {
+      if (!venueModalOpen || !selectedVenue?.id) {
+        setVenueEventsFromDb([]);
+        setVenueEventsLoading(false);
+        return;
+      }
+
+      try {
+        setVenueEventsLoading(true);
+        const response = await fetchEventsByVenue(String(selectedVenue.id));
+        if (!isMounted) return;
+        const mapped = Array.isArray(response) ? response.map(mapApiEventToVenueEvent) : [];
+        setVenueEventsFromDb(mapped);
+      } catch {
+        if (!isMounted) return;
+        setVenueEventsFromDb([]);
+      } finally {
+        if (isMounted) setVenueEventsLoading(false);
+      }
+    };
+
+    loadVenueEventsFromDb();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedVenue?.id, venueModalOpen]);
+
+  const selectedVenueEvents = useMemo(() => {
+    if (venueEventsFromDb.length > 0) {
+      return venueEventsFromDb;
+    }
+    return getVenueEvents(selectedVenue?.id);
+  }, [selectedVenue?.id, venueEventsFromDb, venues]);
+
+  const selectedVenueEventSections = useMemo(() => {
+    return splitActiveAndUpcomingEvents(selectedVenueEvents);
+  }, [selectedVenueEvents]);
 
   // Get friends at a venue
   const getFriendsAtVenue = (venueName: string) => {
@@ -900,14 +1097,33 @@ export default function MapTab({ onEventPress }: MapTabProps) {
               }
             }, 100); // Cambio veloce e istantaneo
           }}
-          showsUserLocation={true}
-          showsMyLocationButton={true}
+          showsUserLocation={false}
+          showsMyLocationButton={false}
           showsCompass={false}
           scrollEnabled={true}
           zoomEnabled={true}
           pitchEnabled={false}
           rotateEnabled={false}
         >
+          {userLocation && (
+            <Marker coordinate={userLocation}>
+              <View
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  backgroundColor: "#3b82f6",
+                  borderWidth: 3,
+                  borderColor: "#fff",
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 4,
+                  elevation: 6,
+                }}
+              />
+            </Marker>
+          )}
           {/* TILE MAPPA CARTODB DARK - GRATUITO E MINIMALIST */}
           <UrlTile
             urlTemplate="https://{s}.basemaps.cartocdn.com/dark/{z}/{x}/{y}.png"
@@ -929,14 +1145,35 @@ export default function MapTab({ onEventPress }: MapTabProps) {
                       longitude: cluster.longitude,
                     }}
                     onPress={() => {
-                      // Zoom meno aggressivo quando clicca sul cluster
+                      // Zoom "fit" sul cluster: mostra chiaramente i locali della zona selezionata
                       if (mapRef.current) {
+                        const clusterLats = cluster.venues.map((venue) => venue.latitude);
+                        const clusterLons = cluster.venues.map((venue) => venue.longitude);
+
+                        const minLat = Math.min(...clusterLats);
+                        const maxLat = Math.max(...clusterLats);
+                        const minLon = Math.min(...clusterLons);
+                        const maxLon = Math.max(...clusterLons);
+
+                        const centerLat = (minLat + maxLat) / 2;
+                        const centerLon = (minLon + maxLon) / 2;
+
+                        const latSpan = maxLat - minLat;
+                        const lonSpan = maxLon - minLon;
+
+                        const fitLatDelta = Math.max(0.012, latSpan * 1.8);
+                        const fitLonDelta = Math.max(0.012, lonSpan * 1.8);
+
+                        // Evita zoom-out accidentale rispetto al livello corrente.
+                        const nextLatDelta = Math.min(mapZoom * 0.75, fitLatDelta);
+                        const nextLonDelta = Math.min(mapZoom * 0.75, fitLonDelta);
+
                         mapRef.current.animateToRegion(
                           {
-                            latitude: cluster.latitude,
-                            longitude: cluster.longitude,
-                            latitudeDelta: 0.06,
-                            longitudeDelta: 0.06,
+                            latitude: centerLat,
+                            longitude: centerLon,
+                            latitudeDelta: nextLatDelta,
+                            longitudeDelta: nextLonDelta,
                           },
                           600
                         );
@@ -1403,7 +1640,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
-              {/* EVENTI NEL LOCALE */}
+              {/* EVENTI ATTIVI */}
               <Text
                 style={{
                   fontSize: 16,
@@ -1412,10 +1649,20 @@ export default function MapTab({ onEventPress }: MapTabProps) {
                   marginBottom: 12,
                 }}
               >
-                🎉 Eventi
+                🔴 Eventi attivi ({selectedVenueEventSections.active.length})
               </Text>
-              {getVenueEvents(selectedVenue?.id).length > 0 ? (
-                getVenueEvents(selectedVenue?.id).map((event) => (
+              {venueEventsLoading ? (
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    marginBottom: 16,
+                    fontStyle: "italic",
+                  }}
+                >
+                  Caricamento eventi...
+                </Text>
+              ) : selectedVenueEventSections.active.length > 0 ? (
+                selectedVenueEventSections.active.map((event) => (
                   <TouchableOpacity
                     key={event.id}
                     onPress={() => {
@@ -1444,7 +1691,7 @@ export default function MapTab({ onEventPress }: MapTabProps) {
                       {event.title}
                     </Text>
                     <Text style={{ fontSize: 12, color: theme.colors.muted }}>
-                      📅 {event.date}
+                      📅 {event.date}{event.time ? ` • ${event.time}` : ""}
                     </Text>
                   </TouchableOpacity>
                 ))
@@ -1456,79 +1703,154 @@ export default function MapTab({ onEventPress }: MapTabProps) {
                     fontStyle: "italic",
                   }}
                 >
-                  Nessun evento disponibile
+                  Nessun evento attivo ora
                 </Text>
               )}
 
               {/* AMICI NEL LOCALE */}
-              {getFriendsAtVenue(selectedVenue?.name).length > 0 && (
-                <>
-                  <Text
+              <Text
+                style={{
+                  fontSize: 16,
+                  fontWeight: "700",
+                  color: theme.colors.text,
+                  marginBottom: 12,
+                  marginTop: 20,
+                }}
+              >
+                👥 Amici qui ({getFriendsAtVenue(selectedVenue?.name).length})
+              </Text>
+              {getFriendsAtVenue(selectedVenue?.name).length > 0 ? (
+                getFriendsAtVenue(selectedVenue?.name).map((friend) => (
+                  <View
+                    key={friend.id}
                     style={{
-                      fontSize: 16,
-                      fontWeight: "700",
-                      color: theme.colors.text,
-                      marginBottom: 12,
-                      marginTop: 20,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      backgroundColor: theme.colors.card,
+                      borderRadius: 14,
+                      padding: 14,
+                      marginBottom: 10,
+                      borderLeftWidth: 4,
+                      borderLeftColor: friend.color,
                     }}
                   >
-                    👥 Amici qui ({getFriendsAtVenue(selectedVenue?.name).length})
-                  </Text>
-                  {getFriendsAtVenue(selectedVenue?.name).map((friend) => (
-                    <View
-                      key={friend.id}
+                    <Image
+                      source={{
+                        uri: `https://i.pravatar.cc/150?img=${parseInt(friend.id) + 2}`,
+                      }}
                       style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        backgroundColor: theme.colors.card,
-                        borderRadius: 14,
-                        padding: 14,
-                        marginBottom: 10,
-                        borderLeftWidth: 4,
-                        borderLeftColor: friend.color,
+                        width: 44,
+                        height: 44,
+                        borderRadius: 22,
+                        marginRight: 14,
+                        borderWidth: 2,
+                        borderColor: friend.color,
+                      }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontWeight: "700",
+                          color: theme.colors.text,
+                          marginBottom: 2,
+                        }}
+                      >
+                        {friend.name}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          color: theme.colors.muted,
+                        }}
+                      >
+                        Online
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.onlineIndicator,
+                        { backgroundColor: friend.color },
+                      ]}
+                    />
+                  </View>
+                ))
+              ) : (
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    marginBottom: 16,
+                    fontStyle: "italic",
+                  }}
+                >
+                  Nessun amico presente al momento
+                </Text>
+              )}
+
+              <Text
+                style={{
+                  fontSize: 16,
+                  fontWeight: "700",
+                  color: theme.colors.text,
+                  marginBottom: 12,
+                  marginTop: 20,
+                }}
+              >
+                🗓️ Prossimi eventi ({selectedVenueEventSections.upcoming.length})
+              </Text>
+              {venueEventsLoading ? (
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    marginBottom: 16,
+                    fontStyle: "italic",
+                  }}
+                >
+                  Caricamento eventi...
+                </Text>
+              ) : selectedVenueEventSections.upcoming.length > 0 ? (
+                selectedVenueEventSections.upcoming.map((event) => (
+                  <TouchableOpacity
+                    key={`upcoming-${event.id}`}
+                    onPress={() => {
+                      setVenueModalOpen(false);
+                      onEventPress?.(event);
+                    }}
+                    style={{
+                      backgroundColor: theme.colors.card,
+                      borderRadius: 14,
+                      padding: 14,
+                      marginBottom: 10,
+                      borderLeftWidth: 4,
+                      borderLeftColor: theme.colors.primary,
+                      borderTopWidth: 1,
+                      borderTopColor: theme.colors.border,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontWeight: "700",
+                        color: theme.colors.text,
+                        marginBottom: 6,
+                        fontSize: 14,
                       }}
                     >
-                      <Image
-                        source={{
-                          uri: `https://i.pravatar.cc/150?img=${parseInt(friend.id) + 2}`,
-                        }}
-                        style={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: 22,
-                          marginRight: 14,
-                          borderWidth: 2,
-                          borderColor: friend.color,
-                        }}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={{
-                            fontWeight: "700",
-                            color: theme.colors.text,
-                            marginBottom: 2,
-                          }}
-                        >
-                          {friend.name}
-                        </Text>
-                        <Text
-                          style={{
-                            fontSize: 11,
-                            color: theme.colors.muted,
-                          }}
-                        >
-                          Online
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.onlineIndicator,
-                          { backgroundColor: friend.color },
-                        ]}
-                      />
-                    </View>
-                  ))}
-                </>
+                      {event.title}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: theme.colors.muted }}>
+                      📅 {event.date}{event.time ? ` • ${event.time}` : ""}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    marginBottom: 16,
+                    fontStyle: "italic",
+                  }}
+                >
+                  Nessun prossimo evento disponibile
+                </Text>
               )}
             </ScrollView>
           </View>

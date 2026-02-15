@@ -13,6 +13,11 @@ export type Reservation = {
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
   guests: number;
   total_amount?: number | string | null;
+  qr_token?: string | null;
+  qr_payload?: string | null;
+  checked_in_at?: string | null;
+  checked_in_by_staff_id?: string | null;
+  checkin_entry_id?: string | null;
   created_at?: string;
   updated_at?: string;
   // Relations

@@ -60,6 +60,7 @@ export const API_ENDPOINTS = {
     LIST: '/reservations',
     DETAIL: (id: string) => `/reservations/${id}`,
     CREATE: '/reservations',
+    SCAN_ENTRY_QR: '/reservations/scan-entry-qr',
     UPDATE: (id: string) => `/reservations/${id}`,
     CANCEL: (id: string) => `/reservations/${id}/cancel`,
     MY_RESERVATIONS: '/reservations/me',

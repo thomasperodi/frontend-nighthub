@@ -1,9 +1,9 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { useState, useRef, useEffect } from "react";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { recordEntry, fetchStaffEventStats, listEntries } from "../../../services/staff";
+import { recordEntry, fetchStaffEventStats, listEntries, scanEntryQr } from "../../../services/staff";
 import { EventStats } from "../../../types/events";
 
 type Props = {
@@ -11,15 +11,17 @@ type Props = {
   openPrompt: (cfg: any) => void;
   eventId: string;
   staffId?: string;
+  venueId?: string;
 };
 
-export default function IngressoTab({ showToast, openPrompt, eventId, staffId }: Props) {
+export default function IngressoTab({ showToast, openPrompt, eventId, staffId, venueId }: Props) {
   const { theme } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
   const [stats, setStats] = useState({ uomini: 0, donne: 0, omaggi: 0 });
   const [eventStats, setEventStats] = useState<EventStats | null>(null);
   const [busy, setBusy] = useState(false);
+  const [scanBusy, setScanBusy] = useState(false);
   const pulse = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -88,6 +90,34 @@ export default function IngressoTab({ showToast, openPrompt, eventId, staffId }:
     }
   };
 
+  const handleQrScanned = async (data: string) => {
+    if (scanBusy) return;
+    setScanBusy(true);
+
+    try {
+      if (!eventId) {
+        showToast('Imposta prima un evento');
+        return;
+      }
+
+      const result = await scanEntryQr({
+        event_id: eventId,
+        qr_data: data,
+        staff_id: staffId,
+      });
+
+      if (result?.alreadyCheckedIn) {
+        showToast('Ingresso già registrato');
+      } else {
+        showToast('Ingresso registrato');
+      }
+    } catch {
+      showToast('Errore registrazione ingresso');
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
   if (!permission?.granted) {
     return (
       <View style={styles.center}>
@@ -114,10 +144,7 @@ export default function IngressoTab({ showToast, openPrompt, eventId, staffId }:
           barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
           onBarcodeScanned={({ data }) => {
             setScanning(false);
-            showToast('QR scansionato');
-            Alert.alert("QR Scansionato", `Codice: ${data}`, [
-              { text: "OK" }
-            ]);
+            void handleQrScanned(data);
           }}
         >
           <View style={styles.scanOverlay}>

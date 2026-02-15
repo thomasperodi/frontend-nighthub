@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { login as apiLogin, persistLogin, clearLogin, restoreLogin, logoutApi } from '../services/auth';
 import { resetTo } from '../navigation/NavigationService';
+import { registerForPushNotifications, sendPushToken } from '../services/push';
+import { startVenueStayMonitoring } from '../services/locationTracking';
 
 type PublicUser = { id: string; email: string; role: string; venue_id?: string | null };
 
@@ -28,6 +32,16 @@ export const AuthProvider = ({ children }: any) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      }),
+    });
+  }, []);
+
+  useEffect(() => {
     (async () => {
       const res = await restoreLogin();
       if (res.token) {
@@ -37,6 +51,82 @@ export const AuthProvider = ({ children }: any) => {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    if (!user || !token) return;
+    if (user.role !== 'client') return;
+
+    let mounted = true;
+
+    const handleVenueStay = async (payload: any) => {
+      const venueId = payload?.venue_id;
+      const latitude = Number(payload?.latitude);
+      const longitude = Number(payload?.longitude);
+      const radius = Number(payload?.radius);
+
+      if (!venueId || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return;
+      }
+
+      const response = await startVenueStayMonitoring({
+        venue_id: String(venueId),
+        latitude,
+        longitude,
+        radius: Number.isFinite(radius) ? radius : 100,
+      });
+
+      if (!response.started) {
+        const msg =
+          response.status === 'foreground-denied'
+            ? 'Permesso posizione negato'
+            : response.status === 'background-denied'
+              ? 'Consenti posizione sempre per il tracking'
+              : 'Errore avvio posizione';
+        Alert.alert('Posizione', msg);
+      }
+    };
+
+    const confirmAndStart = (payload: any) => {
+      Alert.alert(
+        'Monitoraggio posizione',
+        'Per analisi dati del locale, avviamo il monitoraggio della posizione durante la permanenza.',
+        [
+          { text: 'Annulla', style: 'cancel' },
+          { text: 'Avvia', onPress: () => void handleVenueStay(payload) },
+        ],
+      );
+    };
+
+    const register = async () => {
+      const result = await registerForPushNotifications();
+      if (!mounted) return;
+      if (result.token) {
+        await sendPushToken(result.token);
+      }
+    };
+
+    const receivedSub = Notifications.addNotificationReceivedListener((event) => {
+      const payload = event.request.content.data as any;
+      if (payload?.type === 'venue_stay') {
+        void handleVenueStay(payload);
+      }
+    });
+
+    const responseSub = Notifications.addNotificationResponseReceivedListener((event) => {
+      const payload = event.notification.request.content.data as any;
+      if (payload?.type === 'venue_stay') {
+        confirmAndStart(payload);
+      }
+    });
+
+    void register();
+
+    return () => {
+      mounted = false;
+      receivedSub.remove();
+      responseSub.remove();
+    };
+  }, [user?.id, token]);
 
   const signIn = async (email: string, password: string) => {
     const data = await apiLogin(email, password);

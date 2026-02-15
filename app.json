@@ -2,7 +2,7 @@
   "expo": {
     "name": "NightHub",
     "slug": "frontend-app",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -24,7 +24,7 @@
         "NSLocationWhenInUseUsageDescription": "Usiamo la posizione per mostrare locali ed eventi nelle vicinanze e migliorare l'esperienza.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Usiamo la posizione anche in background per aggiornare la mappa e mostrarti locali e amici vicini.",
         "NSLocationAlwaysUsageDescription": "Usiamo la posizione anche in background per aggiornare la mappa e mostrarti locali e amici vicini.",
-        "UIBackgroundModes": ["location"]
+        "UIBackgroundModes": ["location", "remote-notification"]
       }
     },
     "android": {
@@ -34,7 +34,10 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
@@ -48,7 +51,16 @@
     "owner": "thomas88",
     "plugins": [
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      "expo-notifications",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Consenti accesso alla libreria per leggere le immagini.",
+          "savePhotosPermission": "Consenti di salvare il QR code nella galleria.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
     ]
   }
 }

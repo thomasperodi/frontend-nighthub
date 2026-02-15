@@ -8,6 +8,8 @@ export const GEOFENCE_TASK_NAME = "nightapp-venue-geofence";
 const STORAGE_KEY = "lastLocationUpdate";
 const GEOFENCE_STATE_KEY = "venueGeofenceState";
 const GEOFENCE_LOG_KEY = "venueGeofenceLog";
+const VENUE_STAY_ACTIVE_KEY = "venueStayActive";
+const VENUE_STAY_LOG_KEY = "venueStayLog";
 const TOKEN_KEY = "auth_token";
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -18,6 +20,14 @@ export type StoredLocation = {
     accuracy?: number | null;
   };
   timestamp: number;
+};
+
+type ActiveVenueStay = {
+  venue_id: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  entered_at: number;
 };
 
 const persistLocation = async (location: Location.LocationObject) => {
@@ -56,6 +66,55 @@ const sendVenueStayCheckpoint = async (payload: {
   }
 };
 
+const calculateDistanceKm = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number => {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+const getActiveVenueStay = async (): Promise<ActiveVenueStay | null> => {
+  const raw = await AsyncStorage.getItem(VENUE_STAY_ACTIVE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ActiveVenueStay;
+  } catch {
+    return null;
+  }
+};
+
+const setActiveVenueStay = async (stay: ActiveVenueStay) => {
+  await AsyncStorage.setItem(VENUE_STAY_ACTIVE_KEY, JSON.stringify(stay));
+};
+
+const clearActiveVenueStay = async () => {
+  await AsyncStorage.removeItem(VENUE_STAY_ACTIVE_KEY);
+};
+
+const logVenueStay = async (stay: {
+  venueId: string;
+  enteredAt: number;
+  exitedAt: number;
+  durationMs: number;
+}) => {
+  const historyRaw = await AsyncStorage.getItem(VENUE_STAY_LOG_KEY);
+  const history = historyRaw ? (JSON.parse(historyRaw) as typeof stay[]) : [];
+  history.unshift(stay);
+  await AsyncStorage.setItem(VENUE_STAY_LOG_KEY, JSON.stringify(history.slice(0, 100)));
+};
+
 if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
   TaskManager.defineTask(LOCATION_TASK_NAME, async (task: any) => {
     const { data, error } = task ?? {};
@@ -70,7 +129,40 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
       return;
     }
 
-    await persistLocation(locations[0]);
+    const latest = locations[0];
+    await persistLocation(latest);
+
+    const activeStay = await getActiveVenueStay();
+    if (!activeStay) {
+      return;
+    }
+
+    const distanceKm = calculateDistanceKm(
+      latest.coords.latitude,
+      latest.coords.longitude,
+      activeStay.latitude,
+      activeStay.longitude
+    );
+    const outsideVenue = distanceKm * 1000 > activeStay.radius;
+
+    if (outsideVenue) {
+      const exitedAt = latest.timestamp || Date.now();
+      await clearActiveVenueStay();
+      await stopBackgroundLocationUpdates();
+
+      await logVenueStay({
+        venueId: activeStay.venue_id,
+        enteredAt: activeStay.entered_at,
+        exitedAt,
+        durationMs: Math.max(0, exitedAt - activeStay.entered_at),
+      });
+
+      await sendVenueStayCheckpoint({
+        venue_id: activeStay.venue_id,
+        event_type: "exit",
+        timestamp: new Date(exitedAt).toISOString(),
+      });
+    }
   });
 }
 
@@ -192,6 +284,64 @@ export const startBackgroundLocationUpdates = async (): Promise<{
   }
 };
 
+export const startVenueStayMonitoring = async (params: {
+  venue_id: string;
+  latitude: number;
+  longitude: number;
+  radius?: number;
+}): Promise<{ started: boolean; status: "started" | "foreground-denied" | "background-denied" | "error" }> => {
+  const foreground = await Location.requestForegroundPermissionsAsync();
+  if (foreground.status !== "granted") {
+    return { started: false, status: "foreground-denied" };
+  }
+
+  const background = await Location.requestBackgroundPermissionsAsync();
+  if (background.status !== "granted") {
+    return { started: false, status: "background-denied" };
+  }
+
+  try {
+    await stopBackgroundLocationUpdates();
+
+    const enteredAt = Date.now();
+    await setActiveVenueStay({
+      venue_id: params.venue_id,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      radius: params.radius ?? 100,
+      entered_at: enteredAt,
+    });
+
+    await sendVenueStayCheckpoint({
+      venue_id: params.venue_id,
+      event_type: "enter",
+      timestamp: new Date(enteredAt).toISOString(),
+    });
+
+    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+      accuracy: Location.Accuracy.Balanced,
+      timeInterval: 15 * 60 * 1000,
+      distanceInterval: 0,
+      pausesUpdatesAutomatically: true,
+      showsBackgroundLocationIndicator: true,
+      foregroundService: {
+        notificationTitle: "NightHub: controllo permanenza",
+        notificationBody: "Verifichiamo se sei ancora nel locale.",
+        notificationColor: "#6D5BFF",
+      },
+    });
+
+    return { started: true, status: "started" };
+  } catch {
+    return { started: false, status: "error" };
+  }
+};
+
+export const stopVenueStayMonitoring = async () => {
+  await clearActiveVenueStay();
+  await stopBackgroundLocationUpdates();
+};
+
 export const stopBackgroundLocationUpdates = async () => {
   try {
     const started = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
@@ -244,6 +394,21 @@ export const stopVenueGeofencing = async () => {
 
 export const getVenueStayHistory = async () => {
   const raw = await AsyncStorage.getItem(GEOFENCE_LOG_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as {
+      venueId: string;
+      enteredAt: number;
+      exitedAt: number;
+      durationMs: number;
+    }[];
+  } catch {
+    return [];
+  }
+};
+
+export const getVenueStayMonitoringHistory = async () => {
+  const raw = await AsyncStorage.getItem(VENUE_STAY_LOG_KEY);
   if (!raw) return [];
   try {
     return JSON.parse(raw) as {

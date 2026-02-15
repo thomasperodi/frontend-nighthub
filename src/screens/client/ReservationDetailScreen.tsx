@@ -1,13 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, Share } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, ScrollView, Alert, Platform, ToastAndroid, Linking } from "react-native";
 import { useTheme } from "../../theme/ThemeProvider";
 import { getReservation, cancelReservation } from "../../services/reservations";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Feather } from "@expo/vector-icons";
+import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system";
 
 export default function ReservationDetailScreen({ route, navigation }: any) {
   const { id } = route.params;
   const { theme } = useTheme();
   const [res, setRes] = useState<any>(null);
   const [qrOpen, setQrOpen] = useState(false);
+  const [savingQr, setSavingQr] = useState(false);
 
   const load = async () => {
     const r = await getReservation(id);
@@ -18,81 +23,204 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
 
   if (!res) return null;
 
+  const qrValue =
+    res.qr_payload ??
+    res.qrToken ??
+    res.qr_token ??
+    JSON.stringify({
+      type: 'event_entry',
+      reservation_id: res.id,
+      user_id: res.user_id,
+      event_id: res.event_id,
+    });
+
+  const isCheckedIn = Boolean(res.checked_in_at);
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=800x800&data=${encodeURIComponent(qrValue)}`;
+
   const eventName = res.event?.name ?? res.event_id;
   const tableLabel = res.venue_table?.numero
     ? `Tavolo ${res.venue_table.numero}`
     : res.venue_table?.nome ?? 'Tavolo';
   const zoneLabel = res.venue_table?.zona ?? '';
 
+  const showMessage = (message: string) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert('Info', message);
+  };
+
+  const saveQrToGallery = async () => {
+    if (savingQr) return;
+
+    try {
+      setSavingQr(true);
+
+      const currentPermission = await MediaLibrary.getPermissionsAsync(true, ['photo']);
+      let granted = currentPermission.granted;
+
+      if (!granted) {
+        const requestedPermission = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
+        granted = requestedPermission.granted;
+      }
+
+      if (!granted) {
+        Alert.alert(
+          'Permesso richiesto',
+          'Per salvare il QR devi consentire l\'accesso a Foto/Galleria nelle impostazioni del telefono.',
+          [
+            { text: 'Annulla', style: 'cancel' },
+            {
+              text: 'Apri impostazioni',
+              onPress: () => {
+                void Linking.openSettings();
+              },
+            },
+          ],
+        );
+        return;
+      }
+
+      const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+      if (!dir) {
+        Alert.alert('Errore', 'Impossibile accedere allo storage del dispositivo.');
+        return;
+      }
+
+      const fileUri = `${dir}reservation-qr-${res.id}.png`;
+      await FileSystem.downloadAsync(qrImageUrl, fileUri);
+
+      await MediaLibrary.saveToLibraryAsync(fileUri);
+      showMessage('QR salvato in galleria');
+    } catch {
+      Alert.alert('Errore', 'Non sono riuscito a salvare il QR in galleria.');
+    } finally {
+      setSavingQr(false);
+    }
+  };
+
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }] }>
-      <View style={{ padding: 18 }}>
-        <Text style={{ fontSize: 18, fontWeight: '800', color: theme.colors.text }}>{eventName}</Text>
-        {res.type === 'table' ? (
-          <Text style={{ color: theme.colors.muted, marginTop: 6 }}>
-            {zoneLabel ? `${zoneLabel} • ` : ''}{tableLabel}
-          </Text>
-        ) : (
-          <Text style={{ color: theme.colors.muted, marginTop: 6 }}>Ingresso</Text>
-        )}
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={["top", "bottom"]}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={[styles.topCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
+          <Text style={[styles.eventTitle, { color: theme.colors.text }]}>{eventName}</Text>
+          {res.type === 'table' ? (
+            <Text style={[styles.metaText, { color: theme.colors.muted }]}>
+              {zoneLabel ? `${zoneLabel} • ` : ''}{tableLabel}
+            </Text>
+          ) : (
+            <Text style={[styles.metaText, { color: isCheckedIn ? theme.colors.primary : theme.colors.muted }]}> 
+              {isCheckedIn ? 'Ingresso registrato al locale' : 'Biglietto ingresso attivo'}
+            </Text>
+          )}
+        </View>
 
-        <View style={{ height: 12 }} />
+        <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
+          <Text style={[styles.label, { color: theme.colors.muted }]}>Tipo</Text>
+          <Text style={[styles.value, { color: theme.colors.text }]}>{res.type === 'table' ? 'Prenotazione tavolo' : 'Ingresso QR'}</Text>
 
-        <View style={[{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border }] }>
-          <Text style={{ color: theme.colors.muted }}>Tipo</Text>
-          <Text style={{ color: theme.colors.text, fontWeight: '700', marginTop: 6 }}>{res.type === 'table' ? 'Prenotazione tavolo' : 'Ingresso (QR)'}</Text>
+          {res.guests ? <Text style={[styles.infoLine, { color: theme.colors.muted }]}>{res.guests} persone</Text> : null}
 
-          {res.guests ? (
-            <Text style={{ color: theme.colors.muted, marginTop: 6 }}>{res.guests} persone</Text>
-          ) : null}
-
-          {res.invitees && res.invitees.length ? (
-            <View style={{ marginTop: 8 }}>
-              <Text style={{ color: theme.colors.muted }}>Invitees</Text>
-              {res.invitees.map((i:any, idx:number) => (
-                <Text key={idx} style={{ color: theme.colors.text }}>{i.name} {i.external ? '(esterno)' : ''}</Text>
-              ))}
-            </View>
-          ) : null}
-
-          {res.qrToken ? (
-            <View style={{ marginTop: 12, alignItems: 'center', backgroundColor: theme.colors.card, padding: 12, borderRadius: 8 }}>
-              <Text style={{ color: theme.colors.muted }}>QR Token</Text>
-              <Text style={{ color: theme.colors.text, fontWeight: '700', marginTop: 6 }}>{res.qrToken}</Text>
-              <TouchableOpacity onPress={() => setQrOpen(true)} style={{ marginTop: 12, alignItems: 'center' }}>
-                <Image source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(res.qrToken)}` }} style={{ width: 200, height: 200 }} />
-              </TouchableOpacity>
-
-              <View style={{ flexDirection: 'row', marginTop: 12 }}>
-                <TouchableOpacity onPress={() => { Share.share({ message: `Mostra questo QR al locale: ${res.qrToken}` }); }} style={{ padding: 10, backgroundColor: theme.colors.primary, borderRadius: 8, marginRight: 8 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Condividi QR</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setQrOpen(true)} style={{ padding: 10, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border }}>
-                  <Text style={{ color: theme.colors.muted, fontWeight: '700' }}>Visualizza a schermo intero</Text>
+          {res.type === 'entry' ? (
+            <>
+              <View style={[styles.qrCard, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}> 
+                <Text style={[styles.qrHint, { color: theme.colors.muted }]}>Mostra questo QR allo staff all'ingresso</Text>
+                <TouchableOpacity onPress={() => setQrOpen(true)} activeOpacity={0.85}>
+                  <Image source={{ uri: qrImageUrl }} style={styles.qrImage} />
                 </TouchableOpacity>
               </View>
-            </View>
+
+              <View style={styles.qrActionsRow}>
+                <TouchableOpacity onPress={saveQrToGallery} disabled={savingQr} style={[styles.actionBtnGhost, { borderColor: theme.colors.border }]}> 
+                  <Feather name={savingQr ? "loader" : "download"} size={16} color={theme.colors.text} />
+                  <Text style={[styles.actionGhostText, { color: theme.colors.text }]}>{savingQr ? 'Salvataggio...' : 'Salva in galleria'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => setQrOpen(true)}
+                  style={[styles.actionBtnPrimary, { backgroundColor: theme.colors.primary }]}
+                >
+                  <Feather name="maximize-2" size={16} color={theme.colors.text} />
+                  <Text style={[styles.actionBtnText, { color: theme.colors.text }]}>Apri grande</Text>
+                </TouchableOpacity>
+              </View>
+            </>
           ) : null}
         </View>
 
-        <View style={{ height: 16 }} />
-        <TouchableOpacity style={{ padding: 12, backgroundColor: theme.colors.primary, borderRadius: 10 }} onPress={async () => { await cancelReservation(id); load(); }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Annulla prenotazione</Text>
+        <TouchableOpacity
+          style={[
+            styles.cancelBtn,
+            {
+              backgroundColor: isCheckedIn ? theme.colors.card : theme.colors.primary,
+              borderColor: theme.colors.border,
+            },
+          ]}
+          onPress={async () => {
+            if (isCheckedIn) return;
+            await cancelReservation(id);
+            await load();
+          }}
+          disabled={isCheckedIn}
+        >
+          <Text style={{ color: isCheckedIn ? theme.colors.muted : theme.colors.text, fontWeight: '800' }}>
+            {isCheckedIn ? 'Prenotazione completata' : 'Annulla prenotazione'}
+          </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
-      <Modal visible={qrOpen} transparent animationType="fade">
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}>
-          {res.qrToken ? (
-            <Image source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=600x600&data=${encodeURIComponent(res.qrToken)}` }} style={{ width: 320, height: 320 }} />
-          ) : null}
-          <TouchableOpacity style={{ marginTop: 20, padding: 12, backgroundColor: theme.colors.primary, borderRadius: 8 }} onPress={() => setQrOpen(false)}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Chiudi</Text>
-          </TouchableOpacity>
-        </View>
+      <Modal visible={qrOpen} transparent animationType="fade" onRequestClose={() => setQrOpen(false)}>
+        <SafeAreaView style={styles.modalRoot} edges={["top", "bottom"]}>
+          <View style={[styles.modalInner, { backgroundColor: theme.colors.background }]}> 
+            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Biglietto QR</Text>
+            <Text style={[styles.modalSub, { color: theme.colors.muted }]}>Mostra il codice allo staff del locale</Text>
+            {res.type === 'entry' ? <Image source={{ uri: qrImageUrl }} style={styles.qrFull} /> : null}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalBtnGhost, { borderColor: theme.colors.border }]} onPress={() => setQrOpen(false)}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Chiudi</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtnPrimary, { backgroundColor: theme.colors.primary }]}
+                onPress={saveQrToGallery}
+                disabled={savingQr}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{savingQr ? 'Salvataggio...' : 'Salva'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </SafeAreaView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({ container: { flex: 1 } });
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  content: { padding: 18, gap: 12 },
+  topCard: { borderWidth: 1, borderRadius: 14, padding: 14 },
+  eventTitle: { fontSize: 20, fontWeight: '900' },
+  metaText: { marginTop: 6, fontSize: 13, fontWeight: '700' },
+  sectionCard: { borderWidth: 1, borderRadius: 14, padding: 14 },
+  label: { fontSize: 12, fontWeight: '700' },
+  value: { marginTop: 4, fontSize: 16, fontWeight: '900' },
+  infoLine: { marginTop: 6, fontSize: 13 },
+  qrCard: { marginTop: 12, borderWidth: 1, borderRadius: 12, alignItems: 'center', padding: 12 },
+  qrHint: { fontSize: 12, marginBottom: 10 },
+  qrImage: { width: 220, height: 220, borderRadius: 8 },
+  qrActionsRow: { marginTop: 12, flexDirection: 'row', gap: 8 },
+  actionBtnPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 12, flex: 1 },
+  actionBtnText: { fontSize: 13, fontWeight: '800' },
+  actionBtnGhost: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, borderWidth: 1, paddingVertical: 11, paddingHorizontal: 12, flex: 1 },
+  actionGhostText: { fontSize: 13, fontWeight: '700' },
+  cancelBtn: { marginTop: 2, borderRadius: 12, paddingVertical: 13, alignItems: 'center', borderWidth: 1 },
+  modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)' },
+  modalInner: { marginHorizontal: 18, marginVertical: 24, borderRadius: 16, padding: 16, alignItems: 'center', flex: 1, justifyContent: 'center' },
+  modalTitle: { fontSize: 21, fontWeight: '900' },
+  modalSub: { marginTop: 6, marginBottom: 16, fontSize: 13 },
+  qrFull: { width: 320, height: 320, borderRadius: 10 },
+  modalActions: { marginTop: 20, flexDirection: 'row', gap: 10, width: '100%' },
+  modalBtnGhost: { flex: 1, borderWidth: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  modalBtnPrimary: { flex: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+});

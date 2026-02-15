@@ -304,7 +304,7 @@ export default function CreateEventScreen() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 0.7,
         base64: false,
       });
@@ -536,7 +536,7 @@ export default function CreateEventScreen() {
                     : resolveEventImageUri(posterUri) ?? posterUri,
               }}
               style={styles.posterPreview}
-              resizeMode="cover"
+              resizeMode="contain"
             />
           ) : null}
 
@@ -1182,7 +1182,7 @@ const styles = StyleSheet.create({
   posterPreview: {
     marginTop: 10,
     width: '100%',
-    height: 210,
+    height: 320,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
