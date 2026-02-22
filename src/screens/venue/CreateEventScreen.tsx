@@ -135,6 +135,7 @@ function PickerSheet(props: {
 type GenderFilter = 'ALL' | 'M' | 'F' | 'ALTRO';
 type DiscountType = 'percentage' | 'fixed' | 'free';
 type PromoStatus = 'active' | 'inactive' | 'expired';
+type EventAccessMode = 'LIST' | 'PRE_SALE';
 
 type PriceRuleDraft = {
   id: string;
@@ -181,6 +182,9 @@ export default function CreateEventScreen() {
   const [showEndPicker, setShowEndPicker] = useState(false);
 
   const [description, setDescription] = useState('');
+  const [accessMode, setAccessMode] = useState<EventAccessMode>('LIST');
+  const [presalePrice, setPresalePrice] = useState('');
+  const [presaleCapacity, setPresaleCapacity] = useState('');
 
   const [posterUri, setPosterUri] = useState<string | null>(null);
   const [posterDataUrl, setPosterDataUrl] = useState<string | null>(null);
@@ -222,6 +226,17 @@ export default function CreateEventScreen() {
         setStartTime(normalizeTime(existing.start_time) || '21:00');
         setEndTime(normalizeTime(existing.end_time) || '03:00');
         setDescription(existing.description ?? '');
+        setAccessMode(existing.access_mode === 'PRE_SALE' ? 'PRE_SALE' : 'LIST');
+        setPresalePrice(
+          existing.presale_price !== null && existing.presale_price !== undefined
+            ? String(existing.presale_price)
+            : '',
+        );
+        setPresaleCapacity(
+          existing.presale_capacity !== null && existing.presale_capacity !== undefined
+            ? String(existing.presale_capacity)
+            : '',
+        );
 
         const img = existing.image ? String(existing.image) : null;
         setPosterUri(img);
@@ -275,6 +290,20 @@ export default function CreateEventScreen() {
     if (startTime.trim() && !isValidTime(startTime)) return false;
     if (endTime.trim() && !isValidTime(endTime)) return false;
 
+    if (accessMode === 'PRE_SALE') {
+      const priceNum = Number(presalePrice);
+      if (!presalePrice.trim() || !Number.isFinite(priceNum) || priceNum <= 0) {
+        return false;
+      }
+
+      if (presaleCapacity.trim()) {
+        const capNum = Number(presaleCapacity);
+        if (!Number.isInteger(capNum) || capNum < 1) {
+          return false;
+        }
+      }
+    }
+
     for (const r of priceRules) {
       if (!r.price.trim()) continue;
       const n = Number(r.price);
@@ -292,7 +321,7 @@ export default function CreateEventScreen() {
     }
 
     return true;
-  }, [venueId, name, date, startTime, endTime, priceRules, promos]);
+  }, [venueId, name, date, startTime, endTime, accessMode, presalePrice, presaleCapacity, priceRules, promos]);
 
   const pickPoster = async () => {
     try {
@@ -382,6 +411,22 @@ export default function CreateEventScreen() {
     if (trimmedStart && !isValidTime(trimmedStart)) return setError('Ora inizio non valida (HH:MM o HH:MM:SS)');
     if (trimmedEnd && !isValidTime(trimmedEnd)) return setError('Ora fine non valida (HH:MM o HH:MM:SS)');
 
+    const trimmedPresalePrice = presalePrice.trim();
+    const trimmedPresaleCapacity = presaleCapacity.trim();
+
+    if (accessMode === 'PRE_SALE') {
+      const n = Number(trimmedPresalePrice);
+      if (!trimmedPresalePrice || !Number.isFinite(n) || n <= 0) {
+        return setError('Prezzo prevendita non valido');
+      }
+      if (trimmedPresaleCapacity) {
+        const cap = Number(trimmedPresaleCapacity);
+        if (!Number.isInteger(cap) || cap < 1) {
+          return setError('Capienza prevendita non valida');
+        }
+      }
+    }
+
     for (const r of priceRules) {
       if (!r.price.trim()) continue;
       const n = Number(r.price);
@@ -448,6 +493,14 @@ export default function CreateEventScreen() {
         end_time: trimmedEnd || undefined,
         // Status is automatic (Programmato/Live/Chiuso based on times)
         status: 'DRAFT',
+        access_mode: accessMode,
+        presale_price:
+          accessMode === 'PRE_SALE' ? Number(trimmedPresalePrice) : null,
+        presale_currency: accessMode === 'PRE_SALE' ? 'eur' : undefined,
+        presale_capacity:
+          accessMode === 'PRE_SALE' && trimmedPresaleCapacity
+            ? Number(trimmedPresaleCapacity)
+            : null,
       };
 
       if (isEdit && editEventId) {
@@ -736,6 +789,58 @@ export default function CreateEventScreen() {
 
           <Text style={[styles.label, { color: theme.colors.muted }]}>Stato</Text>
           <Text style={[styles.hint, { color: theme.colors.muted, marginTop: 2 }]}>Automatico: Programmato / Live / Chiuso in base a data e orari.</Text>
+
+          <Text style={[styles.label, { color: theme.colors.muted }]}>Modalità ingresso</Text>
+          <View style={styles.pillRow}>
+            {(['LIST', 'PRE_SALE'] as EventAccessMode[]).map((mode) => {
+              const active = accessMode === mode;
+              return (
+                <TouchableOpacity
+                  key={mode}
+                  onPress={() => setAccessMode(mode)}
+                  style={[
+                    styles.pill,
+                    active && {
+                      borderColor: theme.colors.primary,
+                      backgroundColor: 'rgba(109,91,255,0.18)',
+                    },
+                  ]}
+                >
+                  <Text style={[styles.pillText, active && { color: theme.colors.primary }]}>
+                    {mode === 'LIST' ? 'Lista gratuita' : 'Prevendita Stripe'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {accessMode === 'PRE_SALE' ? (
+            <>
+              <Text style={[styles.label, { color: theme.colors.muted }]}>Prezzo prevendita (€)</Text>
+              <TextInput
+                value={presalePrice}
+                onChangeText={setPresalePrice}
+                placeholder="Es. 15"
+                placeholderTextColor="rgba(255,255,255,0.35)"
+                style={[styles.input, { color: theme.colors.text }]}
+                keyboardType="numeric"
+              />
+
+              <Text style={[styles.label, { color: theme.colors.muted }]}>Capienza prevendita (opzionale)</Text>
+              <TextInput
+                value={presaleCapacity}
+                onChangeText={setPresaleCapacity}
+                placeholder="Es. 300"
+                placeholderTextColor="rgba(255,255,255,0.35)"
+                style={[styles.input, { color: theme.colors.text }]}
+                keyboardType="number-pad"
+              />
+
+              <Text style={[styles.hint, { color: theme.colors.muted, marginTop: 6 }]}>Il cliente paga via Stripe e riceve ticket QR automatico.</Text>
+            </>
+          ) : (
+            <Text style={[styles.hint, { color: theme.colors.muted, marginTop: 6 }]}>Lista: prenotazione gratuita con QR check-in.</Text>
+          )}
 
           <Text style={[styles.label, { color: theme.colors.muted }]}>Descrizione</Text>
           <TextInput

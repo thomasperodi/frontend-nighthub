@@ -1,21 +1,19 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   Keyboard,
-  ActivityIndicator,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../../theme/ThemeProvider";
 import { useAuth } from "../../providers/AuthProvider";
-import { api } from "../../services/api";
-
-
-import GoogleIcon from '../../../assets/svg/GoogleIcon.svg';
 
 import GradientBackground from "../../components/GradientBackground";
 import PrimaryButton from "../../components/PrimaryButton";
@@ -23,11 +21,25 @@ import PrimaryButton from "../../components/PrimaryButton";
 
 export default function LoginScreen({ navigation }: any) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [secure, setSecure] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  const passwordRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const validate = () => {
     setError(null);
@@ -67,115 +79,117 @@ export default function LoginScreen({ navigation }: any) {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    setIsSubmitting(true);
-    try {
-      // TODO: integrare Google Sign-In (expo-auth-session / react-native-google-signin)
-      await new Promise((res) => setTimeout(res, 800));
-      // navigation.navigate("ClientHome");
-      // navigation.navigate("VenueHome");
-      navigation.navigate("StaffHome");
-    } catch (e) {
-      setError("Impossibile accedere con Google.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleForgotPassword = () => {
-    navigation.navigate("ForgotPassword");
-  };
-
-
   return (
     <GradientBackground>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.container}>
-          <Text style={[styles.title, { color: theme.colors.text }]}>Bentornato</Text>
-          <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Accedi e gestisci la tua serata</Text>
+      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
+        <KeyboardAvoidingView
+          style={styles.container}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: (insets.bottom || 0) + (keyboardVisible ? 28 : 170) },
+            ]}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode="none"
+            contentInsetAdjustmentBehavior="always"
+            showsVerticalScrollIndicator={false}
+          >
+              <View style={styles.heroArea}>
+                <Text style={[styles.title, { color: theme.colors.text }]}>Bentornato 👋</Text>
+                <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Accedi in pochi secondi e organizza la tua serata senza stress</Text>
+              </View>
 
-          <View style={[styles.form, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }] }>
-            {error ? <Text style={[styles.error, { color: theme.colors.error }]}>{error}</Text> : null}
-
-            <Text style={[styles.label, { color: theme.colors.muted }]}>Email</Text>
-            <TextInput
-              placeholder="nome@esempio.com"
-              placeholderTextColor={theme.colors.muted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
-              style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-              returnKeyType="next"
-              accessible
-              accessibilityLabel="Email"
-            />
-
-
-
-            <Text style={[styles.label, { marginTop: 8, color: theme.colors.muted }]}>Password</Text>
-
-            <View style={styles.passwordWrapper}>
-              <TouchableOpacity
-                onPress={() => setSecure((s) => !s)}
-                style={[styles.iconAbove, { backgroundColor: theme.colors.card }]}
-                accessibilityRole="button"
-                accessibilityLabel={secure ? "Mostra password" : "Nascondi password"}
-              >
-                <Feather name={secure ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
-              </TouchableOpacity>
-
-              <TextInput
-                placeholder="Inserisci la tua password"
-                placeholderTextColor={theme.colors.muted}
-                secureTextEntry={secure}
-                value={password}
-                onChangeText={setPassword}
-                style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                returnKeyType="done"
-                accessible
-                accessibilityLabel="Password"
-              />
-            </View>
-
-            {/* <TouchableOpacity onPress={handleForgotPassword} accessibilityRole="button">
-              <Text style={[styles.forgotText, { color: theme.colors.muted }]}>Password dimenticata?</Text>
-            </TouchableOpacity> */}
-
-            <PrimaryButton
-              title={isSubmitting ? "Accedendo..." : "Accedi"}
-              onPress={handleLogin}
-              disabled={isSubmitting}
-              isLoading={isSubmitting}
-            />
-
-            {/* <Text style={[styles.or, { color: theme.colors.muted }]}>— oppure —</Text>
-
-            <TouchableOpacity
-              style={[styles.googleButton, isSubmitting && { opacity: 0.7 }, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-              onPress={handleGoogleSignIn}
-              disabled={isSubmitting}
-              accessibilityRole="button"
-              accessibilityLabel="Accedi con Google"
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color={theme.colors.text} />
-              ) : (
-                <View style={styles.googleContent}>
-                  <Text style={[styles.googleText, { color: theme.colors.text }]}>Accedi con Google</Text>
+              <View style={[styles.valueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                <View style={styles.valueRow}>
+                  <Feather name="check-circle" size={16} color={theme.colors.primary} />
+                  <Text style={[styles.valueText, { color: theme.colors.text }]}>Prenoti ingressi e tavoli in un attimo</Text>
                 </View>
-              )}
-            </TouchableOpacity>
+                <View style={styles.valueRow}>
+                  <Feather name="check-circle" size={16} color={theme.colors.primary} />
+                  <Text style={[styles.valueText, { color: theme.colors.text }]}>Vedi promo e vantaggi reali subito</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.reviewOnboardingButton}
+                  onPress={() => navigation.navigate("Onboarding")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Rivedi onboarding"
+                >
+                  <Feather name="play-circle" size={16} color={theme.colors.primary} />
+                  <Text style={[styles.reviewOnboardingText, { color: theme.colors.primary }]}>Rivedi come funziona</Text>
+                </TouchableOpacity>
+              </View>
 
-            <View style={styles.footer}>
-              <Text style={[styles.footerText, { color: theme.colors.muted }]}>Non hai un account?</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("Register")}> 
-                <Text style={[styles.signup, { color: theme.colors.text }]}> Crea uno</Text>
-              </TouchableOpacity>
-            </View> */}
-          </View>
-        </View>
-      </TouchableWithoutFeedback>
+              <View style={[styles.form, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }] }>
+                {error ? <Text style={[styles.error, { color: theme.colors.error }]}>{error}</Text> : null}
+
+                <Text style={[styles.label, { color: theme.colors.muted }]}>Email</Text>
+                <TextInput
+                  placeholder="nome@esempio.com"
+                  placeholderTextColor={theme.colors.muted}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={email}
+                  onChangeText={setEmail}
+                  style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
+                  returnKeyType="next"
+                  blurOnSubmit={false}
+                  onSubmitEditing={() => passwordRef.current?.focus()}
+                  accessible
+                  accessibilityLabel="Email"
+                />
+
+                <Text style={[styles.label, { marginTop: 8, color: theme.colors.muted }]}>Password</Text>
+
+                <View style={styles.passwordWrapper}>
+                  <TouchableOpacity
+                    onPress={() => setSecure((s) => !s)}
+                    style={[styles.iconAbove, { backgroundColor: theme.colors.card }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={secure ? "Mostra password" : "Nascondi password"}
+                  >
+                    <Feather name={secure ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
+                  </TouchableOpacity>
+
+                  <TextInput
+                    ref={passwordRef}
+                    placeholder="Inserisci la tua password"
+                    placeholderTextColor={theme.colors.muted}
+                    secureTextEntry={secure}
+                    value={password}
+                    onChangeText={setPassword}
+                    style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
+                    returnKeyType="done"
+                    onSubmitEditing={handleLogin}
+                    accessible
+                    accessibilityLabel="Password"
+                  />
+                </View>
+              </View>
+
+          </ScrollView>
+
+          {!keyboardVisible && (
+            <View style={[styles.bottomActionArea, { paddingBottom: Math.max(insets.bottom, 12), borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}> 
+              <PrimaryButton
+                title={isSubmitting ? "Accedendo..." : "Accedi"}
+                onPress={handleLogin}
+                disabled={isSubmitting}
+                isLoading={isSubmitting}
+              />
+
+              <View style={styles.footer}>
+                <Text style={[styles.footerText, { color: theme.colors.muted }]}>Non hai un account?</Text>
+                <TouchableOpacity onPress={() => navigation.navigate("Register")}> 
+                  <Text style={[styles.signup, { color: theme.colors.primary }]}> Crea account cliente</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </GradientBackground>
   );
 }
@@ -183,13 +197,47 @@ export default function LoginScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: "center",
+  },
+  scrollContent: {
     padding: 28,
+    paddingBottom: 40,
+  },
+  heroArea: {
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  valueCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 12,
+    gap: 10,
+  },
+  valueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  valueText: {
+    fontSize: 13,
+    fontWeight: "600",
+    flex: 1,
   },
   form: {
     padding: 18,
     borderRadius: 14,
-    marginTop: 12,
+    marginTop: 4,
+    borderWidth: 1,
+  },
+  bottomActionArea: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 0,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    gap: 8,
   },
   title: {
     fontSize: 32,
@@ -199,6 +247,17 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     marginBottom: 10,
+  },
+  reviewOnboardingButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 8,
+    paddingVertical: 2,
+  },
+  reviewOnboardingText: {
+    fontSize: 14,
+    fontWeight: "700",
   },
   label: {
     fontSize: 12,
@@ -225,74 +284,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 2,
   },
-  forgotText: {
-    alignSelf: "flex-end",
-    marginBottom: 18,
-    fontSize: 13,
-  },
-  or: {
-    textAlign: "center",
-    marginVertical: 14,
-  },
-  googleButton: {
-    backgroundColor: "white",
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: "#F0F0F0",
-  },
-
-  debugRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 10,
-  },
-
-  pingButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: '#6D5BFF',
-    borderRadius: 8,
-  },
-
-  pingText: {
-    color: 'white',
-    fontWeight: '800',
-  },
-
-  debugText: {
-    fontSize: 12,
-  },
-  googleContent: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  googleText: {
-    color: "#000",
-    fontWeight: "700",
-    marginLeft: 12,
-  },
   footer: {
     flexDirection: "row",
     justifyContent: "center",
     marginTop: 18,
+    alignItems: "center",
+    flexWrap: "wrap",
   },
   footerText: {
-    color: "#E0D7FF",
+    fontSize: 13,
   },
   signup: {
-    color: "white",
     fontWeight: "700",
+    fontSize: 13,
   },
   error: {
-    color: "#FF7A7A",
+    fontSize: 13,
+    fontWeight: "600",
     marginBottom: 10,
   },
 });

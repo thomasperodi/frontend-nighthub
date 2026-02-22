@@ -52,3 +52,44 @@ export async function updateVenue(id: string, updates: Partial<Venue>): Promise<
 export async function deleteVenue(id: string): Promise<void> {
   await api.delete(API_ENDPOINTS.VENUES.DELETE(id));
 }
+
+export type StripeConnectStatus = {
+  venue_id: string;
+  connected: boolean;
+  stripe_account_id?: string;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  details_submitted: boolean;
+  requirements_due?: string[];
+};
+
+export async function createVenueStripeOnboardingLink(params: {
+  venueId: string;
+  refresh_url?: string;
+  return_url?: string;
+  email?: string;
+}): Promise<{
+  venue_id: string;
+  stripe_account_id: string;
+  onboarding_url: string;
+  expires_at: number;
+}> {
+  const { data } = await api.post(
+    API_ENDPOINTS.VENUES.STRIPE_CONNECT_ONBOARDING(params.venueId),
+    {
+      refresh_url: params.refresh_url,
+      return_url: params.return_url,
+      email: params.email,
+    },
+  );
+  return data;
+}
+
+export async function fetchVenueStripeConnectStatus(
+  venueId: string,
+): Promise<StripeConnectStatus> {
+  const { data } = await api.get<StripeConnectStatus>(
+    API_ENDPOINTS.VENUES.STRIPE_CONNECT_STATUS(venueId),
+  );
+  return data;
+}

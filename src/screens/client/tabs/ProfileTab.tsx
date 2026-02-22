@@ -39,6 +39,12 @@ export default function ProfileTab({ navigation }: ProfileTabProps) {
       color: theme.colors.primary,
     },
     {
+      icon: 'play-circle' as const,
+      label: 'Rivedi onboarding',
+      onPress: () => navigation.navigate('Onboarding'),
+      color: theme.colors.primary,
+    },
+    {
       icon: 'settings' as const,
       label: 'Impostazioni',
       onPress: () => {},
@@ -73,7 +79,7 @@ export default function ProfileTab({ navigation }: ProfileTabProps) {
           </View>
           <View style={styles.profileInfo}>
             <Text style={[styles.profileName, { color: theme.colors.text }]}>
-              {user?.name || user?.email || 'Utente'}
+              {user?.email || 'Utente'}
             </Text>
             <Text style={[styles.profileEmail, { color: theme.colors.muted }]}>
               {user?.email || 'email@example.com'}

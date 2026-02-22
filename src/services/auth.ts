@@ -5,6 +5,19 @@ const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
 const ONBOARDING_SEEN_KEY = 'onboarding_seen_v1';
 
+export type RegisterPayload = {
+  email: string;
+  username: string;
+  password: string;
+  role: 'client' | 'venue' | 'staff' | 'admin';
+  name: string;
+  phone?: string;
+  avatar?: string;
+  sesso: 'M' | 'F' | 'ALTRO';
+  birth_date: string;
+  venue_id?: string;
+};
+
 export async function getOnboardingSeen(): Promise<boolean> {
   const value = await SecureStore.getItemAsync(ONBOARDING_SEEN_KEY);
   return value === '1';
@@ -17,6 +30,11 @@ export async function setOnboardingSeen(seen: boolean = true): Promise<void> {
 export async function login(email: string, password: string) {
   const res = await api.post('/auth/login', { email, password });
   return res.data; // { access_token, user }
+}
+
+export async function register(payload: RegisterPayload) {
+  const res = await api.post('/auth/register', payload);
+  return res.data;
 }
 
 export async function persistLogin(token: string, user: any) {

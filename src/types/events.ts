@@ -1,4 +1,5 @@
 export type EventStatus = 'DRAFT' | 'LIVE' | 'CLOSED';
+export type EventAccessMode = 'LIST' | 'PRE_SALE';
 
 export type EventStats = {
   event_id: string;
@@ -28,6 +29,11 @@ export type Event = {
   start_time?: string; // HH:MM[:SS]
   end_time?: string;   // HH:MM[:SS]
   status?: EventStatus;
+  access_mode?: EventAccessMode;
+  presale_price?: number | null;
+  presale_currency?: string;
+  presale_capacity?: number | null;
+  presale_sold?: number;
   description?: string;
   image?: string;
   tags?: string[];
@@ -52,6 +58,10 @@ export type Venue = {
   latitude?: number | string | null;
   longitude?: number | string | null;
   radius_geofence?: number | null;
+  stripe_account_id?: string | null;
+  stripe_charges_enabled?: boolean;
+  stripe_payouts_enabled?: boolean;
+  stripe_onboarding_completed_at?: string | null;
   status?: 'active' | 'inactive' | 'pending';
   occupancy?: number;
   revenue?: number;

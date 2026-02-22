@@ -37,6 +37,10 @@ export const API_ENDPOINTS = {
     EVENTS: (id: string) => `/venues/${id}/events`,
     STATS: (id: string) => `/venues/${id}/stats`,
     TABLES: (id: string) => `/venues/${id}/tables`,
+    STRIPE_CONNECT_ONBOARDING: (id: string) =>
+      `/venues/${id}/stripe/connect/onboarding`,
+    STRIPE_CONNECT_STATUS: (id: string) =>
+      `/venues/${id}/stripe/connect/status`,
     TABLE_DELETE: (venueId: string, tableId: string) =>
       `/venues/${venueId}/tables/${tableId}`,
     TABLE_UPDATE: (venueId: string, tableId: string) =>
@@ -66,6 +70,15 @@ export const API_ENDPOINTS = {
     MY_RESERVATIONS: '/reservations/me',
   },
 
+  PAYMENTS: {
+    CREATE_CHECKOUT_SESSION: '/payments/checkout-session',
+    CONFIRM_CHECKOUT_SESSION: (sessionId: string) =>
+      `/payments/checkout-session/${sessionId}/confirm`,
+    CREATE_PAYMENT_SHEET_INTENT: '/payments/payment-sheet-intent',
+    CONFIRM_PAYMENT_INTENT: (paymentIntentId: string) =>
+      `/payments/payment-intent/${paymentIntentId}/confirm`,
+  },
+
   // Users
   USERS: {
     LIST: '/users',
@@ -88,7 +101,10 @@ export const API_ENDPOINTS = {
   ADMIN: {
     DASHBOARD: '/admin/dashboard',
     VENUES: '/admin/venues',
+    CREATE_VENUE: '/admin/venues',
+    UPDATE_VENUE_CONTRACT: (id: string) => `/admin/venues/${id}/contract`,
     USERS: '/admin/users',
+    UPDATE_USER_ASSIGNMENT: (id: string) => `/admin/users/${id}/assignment`,
     REPORTS: '/admin/reports',
     PROFILE: '/admin/profile',
     LOGOUT: '/admin/logout',

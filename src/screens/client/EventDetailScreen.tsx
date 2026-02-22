@@ -15,6 +15,8 @@ import { useAuth } from "../../providers/AuthProvider";
 import { resolveEventImageUri } from "../../utils/media";
 import { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
+import { confirmPaymentIntent, createPaymentSheetIntent } from "../../services/payments";
+import { initStripe, useStripe } from "@stripe/stripe-react-native";
 
 export default function EventDetailScreen({ route, navigation }: any) {
   const { item } = route.params;
@@ -26,10 +28,13 @@ export default function EventDetailScreen({ route, navigation }: any) {
   const [selectedGender, setSelectedGender] = useState<'ALL' | 'M' | 'F' | 'ALTRO'>('ALL');
   const [previewTime, setPreviewTime] = useState<string | null>(null);
   const [isReservingEntry, setIsReservingEntry] = useState(false);
+  const [isBuyingPresale, setIsBuyingPresale] = useState(false);
+  const [presaleQuantity, setPresaleQuantity] = useState(1);
   const [isSharingStory, setIsSharingStory] = useState(false);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const storyCardRef = useRef<View>(null);
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   const eventId = item?.id as string | undefined;
 
@@ -258,6 +263,85 @@ export default function EventDetailScreen({ route, navigation }: any) {
     }
   };
 
+  const isPresaleEvent = display.raw?.access_mode === 'PRE_SALE';
+  const presalePrice =
+    typeof display.raw?.presale_price === 'number'
+      ? display.raw.presale_price
+      : Number(display.raw?.presale_price ?? 0);
+  const presaleCurrency = String(display.raw?.presale_currency ?? 'eur').toUpperCase();
+  const presaleCapacity =
+    display.raw?.presale_capacity !== null && display.raw?.presale_capacity !== undefined
+      ? Number(display.raw.presale_capacity)
+      : null;
+  const presaleSold = Number(display.raw?.presale_sold ?? 0);
+
+  const buyPresale = async () => {
+    if (!user?.id) {
+      Alert.alert('Accedi', 'Devi effettuare l\'accesso per acquistare la prevendita.');
+      return;
+    }
+
+    if (!eventId) {
+      Alert.alert('Errore', 'Evento non valido.');
+      return;
+    }
+
+    try {
+      setIsBuyingPresale(true);
+      const intent = await createPaymentSheetIntent({
+        event_id: eventId,
+        quantity: presaleQuantity,
+      });
+
+      const stripeReturnScheme = 'nighthub';
+      const stripeReturnUrl = `${stripeReturnScheme}://stripe-redirect`;
+
+      await initStripe({
+        publishableKey: process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
+        merchantIdentifier: 'merchant.com.perodithomas.nighthub',
+        urlScheme: stripeReturnScheme,
+        stripeAccountId: intent.stripe_account_id,
+      });
+
+      const init = await initPaymentSheet({
+        merchantDisplayName: 'NightHub',
+        paymentIntentClientSecret: intent.payment_intent_client_secret,
+        allowsDelayedPaymentMethods: false,
+        returnURL: stripeReturnUrl,
+      });
+
+      if (init.error) {
+        Alert.alert('Errore', init.error.message || 'Impossibile inizializzare il pagamento');
+        return;
+      }
+
+      const result = await presentPaymentSheet();
+      if (result.error) {
+        Alert.alert('Pagamento annullato', result.error.message || 'Pagamento non completato');
+        return;
+      }
+
+      const confirmation = await confirmPaymentIntent(intent.payment_intent_id);
+      if (!confirmation.paid || !confirmation.reservation?.id) {
+        Alert.alert('Pagamento in verifica', 'Pagamento ricevuto ma ticket ancora in verifica. Riprova tra qualche secondo.');
+        return;
+      }
+
+      if (Platform.OS === 'android') {
+        ToastAndroid.show('Ticket acquistato con successo', ToastAndroid.SHORT);
+      } else {
+        Alert.alert('Ticket confermato', 'La prevendita è stata confermata.');
+      }
+
+      navigation.navigate('ReservationDetail', { id: confirmation.reservation.id });
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || 'Errore pagamento ticket';
+      Alert.alert('Errore', String(msg));
+    } finally {
+      setIsBuyingPresale(false);
+    }
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }] }>
       <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
@@ -289,6 +373,19 @@ export default function EventDetailScreen({ route, navigation }: any) {
           ) : null}
 
           <View style={{ height: 16 }} />
+          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Accesso evento</Text>
+            <Text style={[styles.promoDetails, { color: theme.colors.muted }]}> 
+              {isPresaleEvent
+                ? `Prevendita online ${presalePrice > 0 ? `• ${presaleCurrency} ${presalePrice}` : ''}`
+                : 'Lista gratuita con QR'}
+            </Text>
+            {isPresaleEvent && presaleCapacity ? (
+              <Text style={[styles.promoDetails, { color: theme.colors.muted }]}>Disponibili: {Math.max(presaleCapacity - presaleSold, 0)} / {presaleCapacity}</Text>
+            ) : null}
+          </View>
+
+          <View style={{ height: 12 }} />
           <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Prezzi ingresso</Text>
 
@@ -378,12 +475,42 @@ export default function EventDetailScreen({ route, navigation }: any) {
           },
         ]}
       >
-        <PrimaryButton
-          title="Riserva il tuo ingresso"
-          onPress={reserveEntry}
-          isLoading={isReservingEntry}
-          disabled={isReservingEntry}
-        />
+        {isPresaleEvent ? (
+          <>
+            <View style={styles.qtyRow}>
+              <Text style={[styles.qtyLabel, { color: theme.colors.muted }]}>Quantità ticket</Text>
+              <View style={[styles.qtyControls, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
+                <TouchableOpacity
+                  onPress={() => setPresaleQuantity((q) => Math.max(1, q - 1))}
+                  style={styles.qtyBtn}
+                >
+                  <Feather name="minus" size={16} color={theme.colors.text} />
+                </TouchableOpacity>
+                <Text style={[styles.qtyValue, { color: theme.colors.text }]}>{presaleQuantity}</Text>
+                <TouchableOpacity
+                  onPress={() => setPresaleQuantity((q) => Math.min(10, q + 1))}
+                  style={styles.qtyBtn}
+                >
+                  <Feather name="plus" size={16} color={theme.colors.text} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <PrimaryButton
+              title={`Acquista prevendita • ${presaleCurrency} ${(presalePrice * presaleQuantity).toFixed(2)}`}
+              onPress={buyPresale}
+              isLoading={isBuyingPresale}
+              disabled={isBuyingPresale}
+            />
+          </>
+        ) : (
+          <PrimaryButton
+            title="Riserva il tuo ingresso"
+            onPress={reserveEntry}
+            isLoading={isReservingEntry}
+            disabled={isReservingEntry}
+          />
+        )}
 
         <View style={styles.secondaryActions}>
           <TouchableOpacity
@@ -478,6 +605,36 @@ const styles = StyleSheet.create({
   secondaryActions: {
     flexDirection: 'row',
     gap: 8,
+  },
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  qtyLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  qtyControls: {
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+  qtyBtn: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyValue: {
+    minWidth: 24,
+    textAlign: 'center',
+    fontSize: 15,
+    fontWeight: '800',
   },
   secondaryBtn: {
     flex: 1,

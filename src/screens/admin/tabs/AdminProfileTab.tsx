@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { fetchAdminProfile, logoutAdmin } from "../../../services/admin";
@@ -14,21 +23,27 @@ export default function AdminProfileTab({ onLogout }: AdminProfileTabProps) {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [profile, setProfile] = useState<AdminProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadProfile = async (asRefresh = false) => {
+    if (asRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+
+    try {
+      const data = await fetchAdminProfile();
+      setProfile(data);
+    } catch (err: any) {
+      setError(String(err?.response?.data?.message || err?.message || "Errore caricamento profilo"));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const data = await fetchAdminProfile();
-        if (!isMounted) return;
-        setProfile(data);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    })();
-    return () => {
-      isMounted = false;
-    };
+    void loadProfile(false);
   }, []);
 
   const handleLogout = async () => {
@@ -42,7 +57,17 @@ export default function AdminProfileTab({ onLogout }: AdminProfileTabProps) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => void loadProfile(true)}
+          tintColor={theme.colors.primary}
+        />
+      }
+    >
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Profilo Admin</Text>
         {loading && (
@@ -51,6 +76,12 @@ export default function AdminProfileTab({ onLogout }: AdminProfileTabProps) {
             <Text style={styles.loadingText}>Caricamento profilo...</Text>
           </View>
         )}
+        {!loading && error ? (
+          <View style={styles.errorCard}>
+            <Feather name="alert-triangle" size={16} color={theme.colors.error} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
         <View style={styles.profileCard}>
           <View style={styles.profileRow}>
             <View style={styles.profileAvatar}>
@@ -59,7 +90,7 @@ export default function AdminProfileTab({ onLogout }: AdminProfileTabProps) {
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>{profile?.name ?? ""}</Text>
               <Text style={styles.profileMeta}>{profile?.email ?? ""}</Text>
-              <Text style={styles.profileRole}>{profile?.role ?? ""}</Text>
+              <Text style={styles.profileRole}>{String(profile?.role ?? "").toUpperCase()}</Text>
             </View>
           </View>
 
@@ -112,6 +143,23 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   loadingText: {
     color: theme.colors.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  errorCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.error,
+    backgroundColor: theme.colors.card,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  errorText: {
+    flex: 1,
+    color: theme.colors.text,
     fontSize: 12,
     fontWeight: "600",
   },

@@ -13,6 +13,7 @@ import StaffStack from './stacks/StaffStack';
 import AdminStack from './stacks/AdminStack';
 
 const Stack = createNativeStackNavigator();
+const RegisterScreen = require('../screens/auth/RegisterScreen').default;
 
 export default function RootNavigator() {
   const { user, loading } = useAuth();
@@ -49,11 +50,13 @@ export default function RootNavigator() {
       );
 
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {!onboardingSeen && (
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-        )}
+      <Stack.Navigator
+        screenOptions={{ headerShown: false }}
+        initialRouteName={onboardingSeen ? 'Login' : 'Onboarding'}
+      >
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Register" component={RegisterScreen} />
       </Stack.Navigator>
     );
   }

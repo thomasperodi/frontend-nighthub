@@ -63,7 +63,7 @@ export default function ReservationsScreen({ navigation }: any) {
                   {item.guests ? ` • ${item.guests} ospiti` : ''}
                 </Text>
               ) : (
-                <Text style={[styles.metaText, { color: theme.colors.muted }]}>Ingresso con QR</Text>
+                <Text style={[styles.metaText, { color: theme.colors.muted }]}>Ingresso con QR{item.total_amount ? ` • €${Number(item.total_amount).toFixed(2)}` : ''}</Text>
               )}
             </View>
 

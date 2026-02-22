@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { fetchAdminReports } from "../../../services/admin";
@@ -11,34 +20,56 @@ export default function AdminReportsTab() {
   const [reports, setReports] = useState<AdminReportsData | null>(null);
   const [revenue, setRevenue] = useState<AdminRevenuePoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadReports = async (asRefresh = false) => {
+    if (asRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+
+    try {
+      const data = await fetchAdminReports();
+      setReports(data);
+      setRevenue(data.revenue);
+    } catch (err: any) {
+      setError(String(err?.response?.data?.message || err?.message || "Errore caricamento report"));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const data = await fetchAdminReports();
-        if (!isMounted) return;
-        setReports(data);
-        setRevenue(data.revenue);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    })();
-    return () => {
-      isMounted = false;
-    };
+    void loadReports(false);
   }, []);
 
   const maxRevenue = Math.max(...revenue.map((r) => r.value), 1);
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => void loadReports(true)}
+          tintColor={theme.colors.primary}
+        />
+      }
+    >
       {loading && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color={theme.colors.primary} />
           <Text style={styles.loadingText}>Caricamento report...</Text>
         </View>
       )}
+      {!loading && error ? (
+        <View style={styles.errorCard}>
+          <Feather name="alert-triangle" size={16} color={theme.colors.error} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
       <Section title="Guadagni settimanali" actionLabel="Esporta" onAction={() => Alert.alert("Report", "Esportazione guadagni avviata")}
       >
         <RevenueChart maxRevenue={maxRevenue} />
@@ -46,6 +77,11 @@ export default function AdminReportsTab() {
       <Section title="Riepilogo mese" actionLabel="Scarica" onAction={() => Alert.alert("Report", "Scarico riepilogo mensile")}
       >
         <SummaryCard />
+      </Section>
+
+      <Section title="Mix ricavi" actionLabel="Dettagli" onAction={() => Alert.alert("Report", "Mostro dettaglio canali")}
+      >
+        <BreakdownCard />
       </Section>
     </ScrollView>
   );
@@ -69,6 +105,7 @@ export default function AdminReportsTab() {
   }
 
   function SummaryCard() {
+    const trendPositive = (reports?.monthVsPrevious ?? 0) >= 0;
     return (
       <View style={styles.summaryCard}>
         <View>
@@ -76,9 +113,34 @@ export default function AdminReportsTab() {
           <Text style={styles.summaryValue}>€ {reports?.monthTotal?.toLocaleString() ?? "0"}</Text>
           <Text style={styles.summaryHint}>{reports?.monthHint ?? ""}</Text>
         </View>
-        <View style={styles.summaryBadge}>
-          <Feather name="trending-up" size={18} color={theme.colors.primary} />
-          <Text style={styles.summaryBadgeText}>Trend positivo</Text>
+        <View style={[styles.summaryBadge, trendPositive ? styles.summaryBadgePositive : styles.summaryBadgeNegative]}>
+          <Feather name={trendPositive ? "trending-up" : "trending-down"} size={18} color={trendPositive ? theme.colors.primary : theme.colors.error} />
+          <Text style={[styles.summaryBadgeText, trendPositive ? styles.summaryBadgeTextPositive : styles.summaryBadgeTextNegative]}>
+            {trendPositive ? "Trend positivo" : "Trend in calo"}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  function BreakdownCard() {
+    const entries = reports?.channelBreakdown?.entries ?? 0;
+    const tables = reports?.channelBreakdown?.tables ?? 0;
+    const total = Math.max(entries + tables, 1);
+    const entryPct = Math.round((entries / total) * 100);
+    const tablePct = Math.round((tables / total) * 100);
+
+    return (
+      <View style={styles.summaryCard}>
+        <View style={styles.breakdownRow}>
+          <Text style={styles.summaryTitle}>Ticket/Entry</Text>
+          <Text style={styles.breakdownValue}>€ {entries.toLocaleString("it-IT")}</Text>
+          <Text style={styles.breakdownPct}>{entryPct}%</Text>
+        </View>
+        <View style={styles.breakdownRow}>
+          <Text style={styles.summaryTitle}>Tavoli</Text>
+          <Text style={styles.breakdownValue}>€ {tables.toLocaleString("it-IT")}</Text>
+          <Text style={styles.breakdownPct}>{tablePct}%</Text>
         </View>
       </View>
     );
@@ -127,6 +189,24 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   loadingText: {
     color: theme.colors.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  errorCard: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.error,
+    backgroundColor: theme.colors.card,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    color: theme.colors.text,
     fontSize: 12,
     fontWeight: "600",
   },
@@ -209,9 +289,38 @@ const createStyles = (theme: any) => StyleSheet.create({
     borderRadius: 12,
     alignSelf: "flex-start",
   },
+  summaryBadgePositive: {
+    backgroundColor: theme.colors.primary + "22",
+  },
+  summaryBadgeNegative: {
+    backgroundColor: theme.colors.error + "22",
+  },
   summaryBadgeText: {
     fontSize: 12,
     fontWeight: "700",
+  },
+  summaryBadgeTextPositive: {
     color: theme.colors.primary,
+  },
+  summaryBadgeTextNegative: {
+    color: theme.colors.error,
+  },
+  breakdownRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 4,
+  },
+  breakdownValue: {
+    fontSize: 13,
+    color: theme.colors.text,
+    fontWeight: "800",
+  },
+  breakdownPct: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: "700",
+    width: 40,
+    textAlign: "right",
   },
 });

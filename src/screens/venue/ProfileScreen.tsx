@@ -1,9 +1,9 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, ScrollView, Linking } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeProvider";
 import { useAuth } from "../../providers/AuthProvider";
 import { deleteAccountApi } from "../../services/auth";
-import { fetchVenueById } from "../../services/venues";
+import { createVenueStripeOnboardingLink, fetchVenueById, fetchVenueStripeConnectStatus, StripeConnectStatus } from "../../services/venues";
 import { useCallback, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 
@@ -16,6 +16,10 @@ export default function ProfileScreen() {
   const [venueError, setVenueError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [stripeStatus, setStripeStatus] = useState<StripeConnectStatus | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [stripeConnecting, setStripeConnecting] = useState(false);
+  const [stripeError, setStripeError] = useState<string | null>(null);
 
   const venueId = user?.venue_id ?? null;
 
@@ -39,10 +43,60 @@ export default function ProfileScreen() {
     }
   }, [venueId]);
 
+  const loadStripeStatus = useCallback(async () => {
+    if (!venueId) {
+      setStripeStatus(null);
+      setStripeError(null);
+      return;
+    }
+    try {
+      setStripeLoading(true);
+      setStripeError(null);
+      const status = await fetchVenueStripeConnectStatus(venueId);
+      setStripeStatus(status);
+    } catch (e: any) {
+      setStripeStatus(null);
+      setStripeError(e?.response?.data?.message || 'Impossibile caricare lo stato Stripe');
+    } finally {
+      setStripeLoading(false);
+    }
+  }, [venueId]);
+
+  const connectStripe = async () => {
+    if (!venueId || stripeConnecting || signingOut || deleting) return;
+    try {
+      setStripeConnecting(true);
+      setStripeError(null);
+
+      const appBase = process.env.EXPO_PUBLIC_APP_BASE_URL || 'https://nighthub.app';
+      const payload = await createVenueStripeOnboardingLink({
+        venueId,
+        email: user?.email,
+        refresh_url: `${appBase}/stripe/connect/refresh?venue_id=${venueId}`,
+        return_url: `${appBase}/stripe/connect/return?venue_id=${venueId}`,
+      });
+
+      if (!payload?.onboarding_url) {
+        throw new Error('Link onboarding non disponibile');
+      }
+
+      await Linking.openURL(payload.onboarding_url);
+      Alert.alert(
+        'Onboarding Stripe aperto',
+        'Completa i dati su Stripe, poi torna qui e premi "Aggiorna stato".',
+      );
+    } catch (e: any) {
+      Alert.alert('Stripe', e?.response?.data?.message || e?.message || 'Errore apertura onboarding Stripe');
+    } finally {
+      setStripeConnecting(false);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       void loadVenue();
-    }, [loadVenue]),
+      void loadStripeStatus();
+    }, [loadVenue, loadStripeStatus]),
   );
 
   const onLogout = async () => {
@@ -146,6 +200,70 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
           ) : null}
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <View style={styles.sectionHeader}>
+            <Feather name="credit-card" size={16} color={theme.colors.muted} />
+            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Stripe pagamenti ticket</Text>
+          </View>
+
+          <View style={styles.rowBetween}>
+            <Text style={[styles.label, { color: theme.colors.muted }]}>Stato</Text>
+            <View style={styles.rowRight}>
+              {stripeLoading ? <ActivityIndicator size="small" color={theme.colors.primary} /> : null}
+              <Text style={[styles.value, { color: theme.colors.text }]}> 
+                {stripeStatus?.connected
+                  ? stripeStatus.charges_enabled && stripeStatus.payouts_enabled
+                    ? 'Attivo'
+                    : 'In verifica'
+                  : 'Non collegato'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.rowBetween, { marginTop: 8 }]}>
+            <Text style={[styles.label, { color: theme.colors.muted }]}>Account ID</Text>
+            <Text style={[styles.value, { color: theme.colors.text }]} numberOfLines={1}>
+              {stripeStatus?.stripe_account_id || '—'}
+            </Text>
+          </View>
+
+          {stripeStatus?.requirements_due?.length ? (
+            <Text style={[styles.error, { color: theme.colors.muted, marginTop: 10 }]}>Campi mancanti: {stripeStatus.requirements_due.join(', ')}</Text>
+          ) : null}
+
+          {stripeError ? (
+            <Text style={[styles.error, { color: theme.colors.error, marginTop: 10 }]}>{stripeError}</Text>
+          ) : null}
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <TouchableOpacity
+              style={[styles.actionBtn, { flex: 1, marginTop: 0, borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, (stripeConnecting || deleting || signingOut) && { opacity: 0.6 }]}
+              onPress={connectStripe}
+              disabled={stripeConnecting || deleting || signingOut}
+              accessibilityRole="button"
+            >
+              <View style={styles.actionLeft}>
+                <View style={[styles.actionIcon, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
+                  <Feather name="link" size={16} color={theme.colors.primary} />
+                </View>
+                <View>
+                  <Text style={[styles.actionTitle, { color: theme.colors.text }]}>Collega / completa Stripe</Text>
+                  <Text style={[styles.actionSub, { color: theme.colors.muted }]}>Autonomia locale</Text>
+                </View>
+              </View>
+              {stripeConnecting ? <ActivityIndicator size="small" color={theme.colors.primary} /> : <Feather name="external-link" size={16} color={theme.colors.muted} />}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.iconBtn, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, alignSelf: 'center' }]}
+              onPress={() => void loadStripeStatus()}
+              disabled={stripeLoading || stripeConnecting}
+            >
+              <Feather name="refresh-cw" size={16} color={theme.colors.muted} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>

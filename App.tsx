@@ -7,6 +7,7 @@ import { navigationRef, flushNavigationQueue } from "./src/navigation/Navigation
 import * as SplashScreen from "expo-splash-screen";
 import LegalConsentModal from "./src/components/LegalConsentModal";
 import { getLegalAccepted, setLegalAccepted } from "./src/services/legal";
+import { StripeProvider } from "@stripe/stripe-react-native";
 
 // Blocca la splash screen all'avvio
 SplashScreen.preventAutoHideAsync();
@@ -60,9 +61,15 @@ export default function App() {
     <ThemeProvider>
       <LegalConsentModal visible={legalVisible} onAccept={acceptLegal} />
       <AuthProvider>
-        <NavigationContainer ref={navigationRef} onReady={flushNavigationQueue}>
-          <RootNavigator />
-        </NavigationContainer>
+        <StripeProvider
+          publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ''}
+          merchantIdentifier="merchant.com.perodithomas.nighthub"
+          urlScheme="nighthub"
+        >
+          <NavigationContainer ref={navigationRef} onReady={flushNavigationQueue}>
+            <RootNavigator />
+          </NavigationContainer>
+        </StripeProvider>
       </AuthProvider>
     </ThemeProvider>
   );

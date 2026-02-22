@@ -8,7 +8,9 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://backend-nighthub-788g.vercel.app",
+        "EXPO_PUBLIC_API_URL": "http://localhost:3000",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51T11tkD7qnYbWpf8XReZgCqBr6nX2Fb4XdCCVb1DXd2l7u2CWclgNDiVLXWFIXHGYtWFUQkAbzmSqYx2JLtTfN3V00O4Fywjrk",
+        "EXPO_PUBLIC_APP_BASE_URL": "http://localhost:3000",
         "EXPO_PUBLIC_SUPABASE_URL": "https://pjeptyhgwaevnlgpovzb.supabase.co",
         "EXPO_PUBLIC_SUPABASE_BUCKET_EVENTS": "NightHub",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqZXB0eWhnd2Fldm5sZ3BvdnpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI5OTIzODIsImV4cCI6MjA2ODU2ODM4Mn0.BPNUU_TBPl3rN5OVnGHWlRGDmdjQaPnzuifDmCqjC4g"
@@ -21,6 +23,8 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://backend-nighthub-788g.vercel.app",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51T11tkD7qnYbWpf8XReZgCqBr6nX2Fb4XdCCVb1DXd2l7u2CWclgNDiVLXWFIXHGYtWFUQkAbzmSqYx2JLtTfN3V00O4Fywjrk",
+        "EXPO_PUBLIC_APP_BASE_URL": "https://backend-nighthub-788g.vercel.app",
         "EXPO_PUBLIC_SUPABASE_URL": "https://pjeptyhgwaevnlgpovzb.supabase.co",
         "EXPO_PUBLIC_SUPABASE_BUCKET_EVENTS": "NightHub",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqZXB0eWhnd2Fldm5sZ3BvdnpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI5OTIzODIsImV4cCI6MjA2ODU2ODM4Mn0.BPNUU_TBPl3rN5OVnGHWlRGDmdjQaPnzuifDmCqjC4g"

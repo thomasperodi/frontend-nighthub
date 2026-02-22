@@ -2,6 +2,7 @@
   "expo": {
     "name": "NightHub",
     "slug": "frontend-app",
+    "scheme": "nighthub",
     "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -53,6 +54,13 @@
       "expo-secure-store",
       "expo-font",
       "expo-notifications",
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.perodithomas.nighthub",
+          "enableGooglePay": false
+        }
+      ],
       [
         "expo-media-library",
         {

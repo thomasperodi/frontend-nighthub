@@ -37,6 +37,8 @@ export const AuthProvider = ({ children }: any) => {
         shouldShowAlert: true,
         shouldPlaySound: false,
         shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
       }),
     });
   }, []);

@@ -1,365 +1,410 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { fetchAdminDashboard } from "../../../services/admin";
-import { AdminAlert, AdminMetrics, AdminRevenuePoint } from "../../../types/admin";
+import { AdminDashboardData } from "../../../types/admin";
+
+const currencyFormatter = new Intl.NumberFormat("it-IT", {
+  style: "currency",
+  currency: "EUR",
+  maximumFractionDigits: 0,
+});
+
+const dateFormatter = new Intl.DateTimeFormat("it-IT", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
+type LoadState = {
+  loading: boolean;
+  refreshing: boolean;
+  error: string | null;
+  data: AdminDashboardData | null;
+};
 
 export default function AdminDashboardTab() {
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
-  const [revenue, setRevenue] = useState<AdminRevenuePoint[]>([]);
-  const [alerts, setAlerts] = useState<AdminAlert[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const data = await fetchAdminDashboard();
-        if (!isMounted) return;
-        setMetrics(data.metrics);
-        setRevenue(data.revenue);
-        setAlerts(data.alerts);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    })();
-    return () => {
-      isMounted = false;
-    };
+  const [state, setState] = useState<LoadState>({
+    loading: true,
+    refreshing: false,
+    error: null,
+    data: null,
+  });
+
+  const loadDashboard = useCallback(async (asRefresh = false) => {
+    setState((prev) => ({
+      ...prev,
+      loading: asRefresh ? prev.loading : true,
+      refreshing: asRefresh,
+      error: null,
+    }));
+
+    try {
+      const data = await fetchAdminDashboard();
+      setState({ loading: false, refreshing: false, error: null, data });
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || "Errore nel caricamento dashboard";
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        refreshing: false,
+        error: String(message),
+      }));
+    }
   }, []);
 
-  const maxRevenue = Math.max(...revenue.map((r) => r.value), 1);
+  React.useEffect(() => {
+    void loadDashboard(false);
+  }, [loadDashboard]);
+
+  const metrics = state.data?.metrics;
+  const urgentContract = state.data?.expiringContracts?.[0] ?? null;
+  const topVenue = state.data?.topVenues?.[0] ?? null;
+  const firstAlert = state.data?.alerts?.[0] ?? null;
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      {loading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={theme.colors.primary} />
-          <Text style={styles.loadingText}>Caricamento dashboard...</Text>
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={state.refreshing}
+          onRefresh={() => void loadDashboard(true)}
+          tintColor={theme.colors.primary}
+        />
+      }
+    >
+      <View style={styles.container}>
+        <View style={styles.heroCard}>
+          <View style={styles.heroTextWrap}>
+            <Text style={styles.heroTitle}>Panoramica essenziale</Text>
+            <Text style={styles.heroSubtitle}>I numeri più utili per decidere subito.</Text>
+          </View>
+          <TouchableOpacity style={styles.refreshButton} onPress={() => void loadDashboard(true)}>
+            <Feather name="refresh-cw" size={14} color={theme.colors.text} />
+            <Text style={styles.refreshButtonText}>Aggiorna</Text>
+          </TouchableOpacity>
         </View>
-      )}
-      <View style={styles.sectionStack}>
-        <Header />
-        <QuickActions />
-        <MetricsGrid />
-        <Section title="Guadagni settimanali" actionLabel="Dettagli" onAction={() => Alert.alert("Report", "Apro i dettagli dei guadagni")}
-        >
-          <RevenueChart maxRevenue={maxRevenue} />
-        </Section>
-        <Section title="Azioni da completare">
-          <AlertsList />
+
+        {state.loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={theme.colors.primary} />
+            <Text style={styles.loadingText}>Caricamento dashboard...</Text>
+          </View>
+        ) : null}
+
+        {state.error ? (
+          <View style={styles.errorCard}>
+            <Feather name="alert-triangle" size={16} color={theme.colors.error} />
+            <Text style={styles.errorText}>{state.error}</Text>
+          </View>
+        ) : null}
+
+        {metrics ? (
+          <>
+            <View style={styles.mainCard}>
+              <Text style={styles.mainLabel}>Ricavi del mese</Text>
+              <Text style={styles.mainValue}>{currencyFormatter.format(metrics.revenueMonth)}</Text>
+              <Text style={styles.mainHint}>
+                Ticket medio {currencyFormatter.format(metrics.avgOrderValue)} • Prenotazioni oggi {metrics.reservationsToday}
+              </Text>
+            </View>
+
+            <View style={styles.kpiRow}>
+              <KpiCard icon="users" label="Utenti attivi" value={metrics.activeUsers30d.toLocaleString("it-IT")} />
+              <KpiCard icon="map-pin" label="Locali attivi" value={`${metrics.activeVenues}/${metrics.totalVenues}`} />
+              <KpiCard icon="clock" label="Permanenza media" value={`${metrics.avgStayMinutes30d} min`} />
+              <KpiCard icon="calendar" label="Scadenze 30g" value={`${metrics.contractsExpiringIn30d}`} />
+            </View>
+          </>
+        ) : null}
+
+        <Section title="Focus di oggi">
+          <FocusItem
+            icon="alert-circle"
+            label="Priorità contratti"
+            value={
+              urgentContract
+                ? `${urgentContract.venueName} • ${urgentContract.daysLeft} gg`
+                : "Nessuna urgenza"
+            }
+            note={
+              urgentContract
+                ? `Scadenza ${dateFormatter.format(new Date(urgentContract.expiresAt))}`
+                : ""
+            }
+          />
+
+          <FocusItem
+            icon="award"
+            label="Top locale"
+            value={topVenue ? topVenue.name : "Nessun dato"}
+            note={topVenue ? currencyFormatter.format(topVenue.revenue) : ""}
+          />
+
+          <FocusItem
+            icon="bell"
+            label="Alert principale"
+            value={firstAlert ? firstAlert.title : "Nessun alert"}
+            note={firstAlert ? firstAlert.detail : ""}
+          />
         </Section>
       </View>
     </ScrollView>
   );
 
-  function Header() {
+  function KpiCard({
+    icon,
+    label,
+    value,
+  }: {
+    icon: keyof typeof Feather.glyphMap;
+    label: string;
+    value: string;
+  }) {
     return (
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Dashboard Admin</Text>
-          <Text style={styles.subtitle}>Panoramica completa dell’app</Text>
+      <View style={styles.kpiCard}>
+        <View style={styles.kpiHead}>
+          <Feather name={icon} size={14} color={theme.colors.primary} />
+          <Text style={styles.kpiLabel}>{label}</Text>
         </View>
-        <View style={styles.profileBadge}>
-          <Feather name="shield" size={22} color="white" />
-        </View>
-      </View>
-    );
-  }
-
-  function QuickActions() {
-    return (
-      <View style={styles.quickActions}>
-        <QuickAction icon="plus-circle" label="Nuovo locale" color={theme.colors.primary} onPress={() => Alert.alert("Locali", "Apro la creazione di un nuovo locale")}
-        />
-        <QuickAction icon="user-check" label="Gestisci utenti" color={theme.colors.accent} onPress={() => Alert.alert("Utenti", "Apro la gestione utenti")}
-        />
-        <QuickAction icon="download" label="Esporta report" color={theme.colors.primary} onPress={() => Alert.alert("Report", "Esportazione avviata")}
-        />
-      </View>
-    );
-  }
-
-  function MetricsGrid() {
-    if (!metrics) return null;
-    return (
-      <View style={styles.metricsGrid}>
-        <MetricCard label="Locali attivi" value={`${metrics.activeVenues}`} hint="+2 questa settimana" />
-        <MetricCard label="Utenti totali" value={`${metrics.totalUsers}`} hint="+1.2k questo mese" />
-        <MetricCard label="Guadagni mensili" value={`€ ${metrics.revenueMonth.toLocaleString()}`} hint="+18% vs mese scorso" />
-        <MetricCard label="Prenotazioni oggi" value={`${metrics.reservationsToday}`} hint="Picco alle 22:00" />
-      </View>
-    );
-  }
-
-  function RevenueChart({ maxRevenue }: { maxRevenue: number }) {
-    return (
-      <View style={styles.chartCard}>
-        {revenue.map((item) => (
-          <View key={item.label} style={styles.chartItem}>
-            <View
-              style={[
-                styles.chartBar,
-                { height: Math.max(16, (item.value / maxRevenue) * 120) },
-              ]}
-            />
-            <Text style={styles.chartLabel}>{item.label}</Text>
-          </View>
-        ))}
-      </View>
-    );
-  }
-
-  function AlertsList() {
-    return (
-      <View>
-        {alerts.map((alert) => (
-          <TouchableOpacity
-            key={alert.id}
-            style={styles.alertCard}
-            onPress={() => Alert.alert(alert.title, alert.detail)}
-          >
-            <View>
-              <Text style={styles.alertTitle}>{alert.title}</Text>
-              <Text style={styles.alertDetail}>{alert.detail}</Text>
-            </View>
-            <Feather name="chevron-right" size={18} color={theme.colors.muted} />
-          </TouchableOpacity>
-        ))}
+        <Text style={styles.kpiValue}>{value}</Text>
       </View>
     );
   }
 }
 
-function Section({
-  title,
-  actionLabel,
-  onAction,
-  children,
-}: {
-  title: string;
-  actionLabel?: string;
-  onAction?: () => void;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {actionLabel ? (
-          <TouchableOpacity onPress={onAction}>
-            <Text style={styles.sectionAction}>{actionLabel}</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-      {children}
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.sectionBody}>{children}</View>
     </View>
   );
 }
 
-function QuickAction({
+function FocusItem({
   icon,
   label,
-  color,
-  onPress,
+  value,
+  note,
 }: {
   icon: keyof typeof Feather.glyphMap;
   label: string;
-  color: string;
-  onPress: () => void;
+  value: string;
+  note: string;
 }) {
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   return (
-    <TouchableOpacity style={styles.quickActionCard} onPress={onPress}>
-      <Feather name={icon} size={20} color={color} />
-      <Text style={styles.quickActionText}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function MetricCard({ label, value, hint }: { label: string; value: string; hint: string }) {
-  const { theme } = useTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-
-  return (
-    <View style={styles.metricCard}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricHint}>{hint}</Text>
+    <View style={styles.focusItem}>
+      <View style={styles.focusIconWrap}>
+        <Feather name={icon} size={14} color={theme.colors.primary} />
+      </View>
+      <View style={styles.focusTextWrap}>
+        <Text style={styles.focusLabel}>{label}</Text>
+        <Text style={styles.focusValue}>{value}</Text>
+        {note ? <Text style={styles.focusNote}>{note}</Text> : null}
+      </View>
     </View>
   );
 }
 
-const createStyles = (theme: any) => StyleSheet.create({
-  scrollContent: {
-    paddingBottom: 140,
-  },
-  loadingContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  loadingText: {
-    color: theme.colors.muted,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  sectionStack: {
-    gap: 8,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "900",
-    color: theme.colors.text,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: theme.colors.muted,
-    marginTop: 4,
-  },
-  profileBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: theme.colors.primary,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: theme.colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  quickActions: {
-    flexDirection: "row",
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  quickActionCard: {
-    flex: 1,
-    backgroundColor: theme.colors.card,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 14,
-    padding: 12,
-    alignItems: "center",
-    gap: 8,
-  },
-  quickActionText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: theme.colors.text,
-    textAlign: "center",
-  },
-  metricsGrid: {
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  metricCard: {
-    backgroundColor: theme.colors.card,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 16,
-    padding: 16,
-    gap: 6,
-  },
-  metricLabel: {
-    fontSize: 13,
-    color: theme.colors.muted,
-    fontWeight: "600",
-  },
-  metricValue: {
-    fontSize: 24,
-    fontWeight: "900",
-    color: theme.colors.text,
-  },
-  metricHint: {
-    fontSize: 12,
-    color: theme.colors.primary,
-    fontWeight: "600",
-  },
-  section: {
-    paddingHorizontal: 20,
-    marginTop: 24,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: theme.colors.text,
-  },
-  sectionAction: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: theme.colors.primary,
-  },
-  chartCard: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: theme.colors.card,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 20,
-  },
-  chartItem: {
-    alignItems: "center",
-    flex: 1,
-  },
-  chartBar: {
-    width: 18,
-    borderRadius: 8,
-    backgroundColor: theme.colors.primary,
-    marginBottom: 8,
-  },
-  chartLabel: {
-    fontSize: 11,
-    color: theme.colors.muted,
-    fontWeight: "700",
-  },
-  alertCard: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: theme.colors.card,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
-  },
-  alertTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: theme.colors.text,
-  },
-  alertDetail: {
-    fontSize: 12,
-    color: theme.colors.muted,
-    marginTop: 4,
-  },
-});
+const createStyles = (theme: any) =>
+  StyleSheet.create({
+    scrollContent: {
+      paddingBottom: 140,
+    },
+    container: {
+      paddingHorizontal: 20,
+      paddingTop: 10,
+      gap: 12,
+    },
+    heroCard: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+      padding: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    heroTextWrap: {
+      flex: 1,
+      gap: 2,
+    },
+    heroTitle: {
+      fontSize: 16,
+      fontWeight: "900",
+      color: theme.colors.text,
+    },
+    heroSubtitle: {
+      fontSize: 12,
+      color: theme.colors.muted,
+      fontWeight: "600",
+    },
+    refreshButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    refreshButtonText: {
+      color: theme.colors.text,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    loadingContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 4,
+    },
+    loadingText: {
+      color: theme.colors.muted,
+      fontSize: 12,
+      fontWeight: "600",
+    },
+    errorCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.error,
+      backgroundColor: `${theme.colors.error}1a`,
+      padding: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    errorText: {
+      flex: 1,
+      color: theme.colors.text,
+      fontSize: 12,
+      fontWeight: "600",
+    },
+    mainCard: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+      padding: 14,
+      gap: 3,
+    },
+    mainLabel: {
+      fontSize: 12,
+      color: theme.colors.muted,
+      fontWeight: "700",
+    },
+    mainValue: {
+      fontSize: 28,
+      color: theme.colors.text,
+      fontWeight: "900",
+    },
+    mainHint: {
+      fontSize: 12,
+      color: theme.colors.primary,
+      fontWeight: "700",
+    },
+    kpiRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+    },
+    kpiCard: {
+      width: "48%",
+      minHeight: 78,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+      padding: 10,
+      justifyContent: "space-between",
+    },
+    kpiHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    kpiLabel: {
+      fontSize: 11,
+      color: theme.colors.muted,
+      fontWeight: "700",
+    },
+    kpiValue: {
+      fontSize: 18,
+      color: theme.colors.text,
+      fontWeight: "900",
+    },
+    section: {
+      gap: 8,
+      marginTop: 4,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      color: theme.colors.text,
+      fontWeight: "900",
+    },
+    sectionBody: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+      padding: 10,
+      gap: 10,
+    },
+    focusItem: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+    },
+    focusIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 9,
+      backgroundColor: `${theme.colors.primary}1f`,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    focusTextWrap: {
+      flex: 1,
+      gap: 2,
+    },
+    focusLabel: {
+      fontSize: 11,
+      color: theme.colors.muted,
+      fontWeight: "700",
+    },
+    focusValue: {
+      fontSize: 13,
+      color: theme.colors.text,
+      fontWeight: "800",
+    },
+    focusNote: {
+      fontSize: 11,
+      color: theme.colors.muted,
+      fontWeight: "600",
+      lineHeight: 15,
+    },
+  });
