@@ -1,8 +1,8 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated, Alert, Modal, TextInput, Platform, Keyboard, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal, Pressable } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeProvider";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../providers/AuthProvider";
 import { fetchActiveEventForVenue } from "../../services/events";
 
@@ -26,6 +26,27 @@ type StaffRole =
   | "bar"
   | null;
 
+const ROLE_OPTIONS: Array<{
+  key: Exclude<StaffRole, null>;
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  description: string;
+}> = [
+  { key: "ingresso", icon: "log-in", label: "Ingresso", description: "Gestisci accessi" },
+  { key: "guardaroba", icon: "archive", label: "Guardaroba", description: "Gestisci capi" },
+  { key: "immagine", icon: "star", label: "Immagine", description: "Tavoli & PR" },
+  { key: "cameriere", icon: "users", label: "Cameriere", description: "Servizio tavoli" },
+  { key: "bar", icon: "coffee", label: "Bar", description: "Vendite rapide" },
+];
+
+const ROLE_LABELS: Record<Exclude<StaffRole, null>, string> = {
+  ingresso: "Ingresso",
+  guardaroba: "Guardaroba",
+  immagine: "Tavoli & PR",
+  cameriere: "Cameriere",
+  bar: "Bar",
+};
+
 export default function StaffHomeScreen() {
   const { theme } = useTheme();
   const { signOut, user } = useAuth();
@@ -40,6 +61,8 @@ export default function StaffHomeScreen() {
   const [eventError, setEventError] = useState<string | null>(null);
   const [debugVisible, setDebugVisible] = useState(false);
   const [debugPayload, setDebugPayload] = useState<any>(null);
+  const hasLiveEvent = !!eventId;
+  const canSelectRole = hasLiveEvent && !loadingEvent;
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -197,46 +220,39 @@ export default function StaffHomeScreen() {
             <Feather name="users" size={32} color="#6D5BFF" />
             <Text style={[styles.title, { color: theme.colors.text }]}>Seleziona il tuo ruolo</Text>
             <Text style={[styles.subtitle, { color: theme.colors.text }]}>Scegli la tua postazione di lavoro</Text>
-            
+          </View>
+
+          <View style={[styles.eventStatusCard, { backgroundColor: theme.colors.card }]}> 
+            <View style={styles.eventStatusHeader}>
+              <Feather name="radio" size={16} color={canSelectRole ? "#22c55e" : "#f59e0b"} />
+              <Text style={[styles.eventStatusTitle, { color: theme.colors.text }]}>Evento corrente</Text>
+            </View>
+            <Text style={[styles.eventStatusMain, { color: hasLiveEvent ? "#22c55e" : theme.colors.text }]}>
+              {loadingEvent ? "Caricamento evento LIVE..." : eventName || "Nessun evento LIVE trovato"}
+            </Text>
+            {!!eventError && <Text style={styles.eventStatusError}>{eventError}</Text>}
+            {!loadingEvent && !hasLiveEvent && (
+              <Text style={[styles.eventStatusHint, { color: theme.colors.text }]}>Serve un evento LIVE per aprire le postazioni.</Text>
+            )}
           </View>
 
           <View style={styles.roleGrid}>
-            <RoleButton 
-              icon="log-in" 
-              label="Ingresso" 
-              description="Gestisci accessi"
-              onPress={() => setRole("ingresso")} 
-            />
-            <RoleButton 
-              icon="archive" 
-              label="Guardaroba" 
-              description="Gestisci capi"
-              onPress={() => setRole("guardaroba")} 
-            />
-            <RoleButton 
-              icon="star" 
-              label="Immagine" 
-              description="Tavoli & PR"
-              onPress={() => setRole("immagine")} 
-            />
-            <RoleButton 
-              icon="users" 
-              label="Cameriere" 
-              description="Servizio tavoli"
-              onPress={() => setRole("cameriere")} 
-            />
-            <RoleButton 
-              icon="coffee" 
-              label="Bar" 
-              description="Vendite rapide"
-              onPress={() => setRole("bar")} 
-            />
+            {ROLE_OPTIONS.map((item) => (
+              <RoleButton
+                key={item.key}
+                icon={item.icon}
+                label={item.label}
+                description={item.description}
+                disabled={!canSelectRole}
+                onPress={() => setRole(item.key)}
+              />
+            ))}
           </View>
         </ScrollView>
 
-        <View style={{ flexDirection: 'row', gap: 12 }}>
+        <View style={styles.selectionFooter}>
           <TouchableOpacity 
-            style={[styles.logoutButtonFloating, { flex: 1 }]}
+            style={[styles.logoutButtonFloating, isLoggingOut && styles.logoutButtonDisabled]}
             onPress={handleLogout}
             disabled={isLoggingOut}
             activeOpacity={0.7}
@@ -257,25 +273,43 @@ export default function StaffHomeScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
-      {/* Event auto-bind */}
-      <Pressable
-        onLongPress={() => setDebugVisible(true)}
-        style={{ padding: 16, gap: 8 }}
-      >
-        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
-          Evento corrente (LIVE)
+      <View style={[styles.roleTopBar, { borderBottomColor: theme.colors.border }]}> 
+        <TouchableOpacity
+          style={styles.roleTopBarAction}
+          onPress={() => setRole(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Torna alla selezione ruoli"
+        >
+          <Feather name="chevron-left" size={18} color={theme.colors.text} />
+          <Text style={[styles.roleTopBarActionText, { color: theme.colors.text }]}>Ruoli</Text>
+        </TouchableOpacity>
+
+        <View style={styles.roleTopBarCenter}>
+          <Text style={[styles.roleTopBarTitle, { color: theme.colors.text }]}>{ROLE_LABELS[role]}</Text>
+          <Text style={[styles.roleTopBarSubtitle, { color: theme.colors.text }]}>Area operativa</Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.roleTopBarAction}
+          onPress={handleLogout}
+          disabled={isLoggingOut}
+          accessibilityRole="button"
+          accessibilityLabel="Logout dal tuo account"
+        >
+          <Feather name="log-out" size={18} color="#EF4444" />
+          <Text style={styles.roleTopBarLogout}>Logout</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Pressable onLongPress={() => setDebugVisible(true)} style={[styles.eventLiveCard, { backgroundColor: theme.colors.card }]}> 
+        <View style={styles.eventLiveHeader}>
+          <Text style={[styles.eventLiveTitle, { color: theme.colors.text }]}>Evento LIVE</Text>
+          <Feather name="info" size={15} color={theme.colors.text} style={{ opacity: 0.6 }} />
+        </View>
+        <Text style={[styles.eventLiveName, { color: hasLiveEvent ? theme.colors.primary : theme.colors.text }]}>
+          {loadingEvent ? 'Caricamento...' : eventName || 'Nessun evento LIVE trovato'}
         </Text>
-        <Text style={{ color: theme.colors.primary, fontWeight: '700', fontSize: 16}}>
-          {loadingEvent ? 'Caricamento...' : eventName || (eventId ? 'Evento attivo' : 'Nessun evento LIVE trovato')}
-        </Text>
-        {eventError && (
-          <Text style={{ color: '#f87171', fontSize: 12 }}>
-            {eventError}
-          </Text>
-        )}
-        <Text style={{ color: theme.colors.text, fontSize: 11, opacity: 0.6 }}>
-          Long press qui per debug
-        </Text>
+        {!!eventError && <Text style={styles.eventLiveError}>{eventError}</Text>}
       </Pressable>
 
       <Modal
@@ -327,58 +361,48 @@ export default function StaffHomeScreen() {
         </Pressable>
       </Modal>
 
-      {role === "ingresso" && (
-        <IngressoTab
-          showToast={showToast}
-          openPrompt={openPrompt}
-          eventId={eventId}
-          staffId={user?.id}
-          venueId={user?.venue_id ?? undefined}
-        />
-      )}
-      {role === "guardaroba" && (
-        <GuardarobaTab
-          showToast={showToast}
-          eventId={eventId}
-          staffId={user?.id}
-        />
-      )}
-      {role === "immagine" && (
-        <ImmagineTab 
-          openPrompt={openPrompt} 
-          showToast={showToast} 
-          eventId={eventId}
-          venueId={user?.venue_id}
-        />
-      )}
-      {role === "cameriere" && (
-        <CameriereTab 
-          openPrompt={openPrompt} 
-          showToast={showToast}
-          userId={user?.id}
-          eventId={eventId}
-          venueId={user?.venue_id}
-        />
-      )}
-      {role === "bar" && (
-        <BarTab
-          openPrompt={openPrompt}
-          showToast={showToast}
-          eventId={eventId}
-          staffId={user?.id}
-        />
-      )}
-
-      <View style={styles.bottomButtonsContainer}>
-        <TouchableOpacity 
-          style={styles.changeRoleButton} 
-          onPress={() => setRole(null)}
-          accessibilityRole="button"
-          accessibilityLabel="Cambia ruolo"
-        >
-          <Feather name="refresh-ccw" size={18} color="white" />
-          <Text style={styles.changeRoleText}>Cambia ruolo</Text>
-        </TouchableOpacity>
+      <View style={styles.roleContent}>
+        {role === "ingresso" && (
+          <IngressoTab
+            showToast={showToast}
+            openPrompt={openPrompt}
+            eventId={eventId}
+            staffId={user?.id}
+            venueId={user?.venue_id ?? undefined}
+          />
+        )}
+        {role === "guardaroba" && (
+          <GuardarobaTab
+            showToast={showToast}
+            eventId={eventId}
+            staffId={user?.id}
+          />
+        )}
+        {role === "immagine" && (
+          <ImmagineTab 
+            openPrompt={openPrompt} 
+            showToast={showToast} 
+            eventId={eventId}
+            venueId={user?.venue_id}
+          />
+        )}
+        {role === "cameriere" && (
+          <CameriereTab 
+            openPrompt={openPrompt} 
+            showToast={showToast}
+            userId={user?.id}
+            eventId={eventId}
+            venueId={user?.venue_id}
+          />
+        )}
+        {role === "bar" && (
+          <BarTab
+            openPrompt={openPrompt}
+            showToast={showToast}
+            eventId={eventId}
+            staffId={user?.id}
+          />
+        )}
       </View>
 
       <PromptModal
@@ -404,8 +428,9 @@ export default function StaffHomeScreen() {
 
 const styles = StyleSheet.create({
   container: { 
-    flex: 1, 
+    flexGrow: 1,
     padding: 20,
+    paddingBottom: 28,
   },
   
   header: {
@@ -434,710 +459,132 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
 
+  eventStatusCard: {
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+  },
+
+  eventStatusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  },
+
+  eventStatusTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    opacity: 0.8,
+  },
+
+  eventStatusMain: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
+  eventStatusHint: {
+    fontSize: 12,
+    marginTop: 6,
+    opacity: 0.7,
+  },
+
+  eventStatusError: {
+    color: "#EF4444",
+    fontSize: 12,
+    marginTop: 6,
+    fontWeight: "600",
+  },
+
   roleGrid: {
     width: '100%',
     marginTop: 8,
   },
 
-  roleButton: {
-    width: "100%",
-    minHeight: 84,
-    backgroundColor: "#6D5BFF",
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    shadowColor: "#6D5BFF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-
-  modalContent: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 20,
-  },
-
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    marginBottom: 12,
-  },
-
-  modalInput: {
-    backgroundColor: 'rgba(0,0,0,0.06)',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    marginBottom: 16,
-    fontSize: 16,
-  },
-
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-  },
-
-  modalBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-
-  modalCancel: {
-    backgroundColor: 'transparent',
-  },
-
-  modalConfirm: {
-    backgroundColor: '#6D5BFF',
-  },
-
-  modalBtnText: {
-    color: '#111827',
-    fontWeight: '700',
-  },
-
-  modalConfirmText: {
-    color: 'white',
-    fontWeight: '900',
-  },
-
-  toast: {
-    position: 'absolute',
-    bottom: 110,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    zIndex: 1000,
-  },
-
-  toastText: {
-    color: 'white',
-    fontWeight: '700',
-  },
-
-  roleIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    justifyContent: "center",
+  selectionFooter: {
+    paddingHorizontal: 20,
+    paddingBottom: 18,
     alignItems: "center",
-    marginRight: 12,
-    marginBottom: 0,
   },
 
-  roleLabel: {
-    color: "white",
-    fontWeight: "900",
-    fontSize: 18,
-    marginBottom: 2,
-    textAlign: "left",
-  },
-
-  roleDescription: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 13,
-    textAlign: "left",
-  },
-
-  roleLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-
-  roleText: {
-    flex: 1,
-  },
-
-  changeRole: {
-    position: "absolute",
-    bottom: 30,
-    alignSelf: "center",
+  roleTopBar: {
     flexDirection: "row",
-    gap: 10,
-    backgroundColor: "rgba(139,123,255,0.9)",
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-
-  changeRoleText: {
-    color: "white",
-    fontWeight: "800",
-    fontSize: 14,
-  },
-
-  roleContainer: {
-  },
-
-  roleHeader: {
-    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 24,
-  },
-
-  roleTitle: { 
-    fontSize: 32, 
-    fontWeight: "900", 
-    color: "white",
-  },
-
-  roleSubtitle: {
-    fontSize: 14,
-    color: "rgba(255,255,255,0.6)",
-    marginTop: 4,
-  },
-
-  totalBadge: {
-    backgroundColor: "#6D5BFF",
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 20,
-    alignItems: "center",
-    minWidth: 70,
+    borderBottomWidth: 1,
   },
 
-  totalBadgeText: {
-    color: "white",
-    fontSize: 24,
+  roleTopBarAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    minWidth: 72,
+  },
+
+  roleTopBarActionText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  roleTopBarLogout: {
+    color: "#EF4444",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  roleTopBarCenter: {
+    alignItems: "center",
+  },
+
+  roleTopBarTitle: {
+    fontSize: 16,
     fontWeight: "900",
   },
 
-  totalBadgeLabel: {
-    color: "rgba(255,255,255,0.8)",
+  roleTopBarSubtitle: {
     fontSize: 11,
+    opacity: 0.7,
     marginTop: 2,
   },
 
-  sectionTitle: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "800",
-    marginBottom: 16,
-    marginTop: 8,
-  },
-
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-
-  /* ======================
-     PERMESSI FOTOCAMERA
-  ====================== */
-
-  permissionCard: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 24,
-    padding: 32,
-    alignItems: "center",
-    maxWidth: 340,
-  },
-
-  permissionTitle: {
-    color: "white",
-    fontSize: 22,
-    fontWeight: "900",
-    marginTop: 20,
-    marginBottom: 8,
-  },
-
-  permissionText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 24,
-    lineHeight: 20,
-  },
-
-  primaryButton: {
-    backgroundColor: "#6D5BFF",
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    shadowColor: "#6D5BFF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-
-  primaryButtonText: { 
-    color: "white", 
-    fontWeight: "800",
-    fontSize: 16,
-  },
-
-  /* ======================
-     SCANNER QR
-  ====================== */
-
-  scanOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  scanFrame: {
-    width: 250,
-    height: 250,
-    borderWidth: 3,
-    borderColor: "white",
-    borderRadius: 24,
-    backgroundColor: "transparent",
-  },
-
-  scanInstruction: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "700",
-    marginTop: 32,
-    textAlign: "center",
-    paddingHorizontal: 32,
-  },
-
-  closeScan: {
-    position: "absolute",
-    top: 60,
-    right: 24,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    padding: 16,
-    borderRadius: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-
-  scanButton: {
-    backgroundColor: "#6D5BFF",
-    borderRadius: 20,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
-    minHeight: 64,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 32,
-    shadowColor: "#6D5BFF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-
-  scanText: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "900",
-  },
-
-  /* ======================
-     STATS CARDS
-  ====================== */
-
-  statsContainer: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 24,
-  },
-
-  statCard: {
-    flex: 1,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 16,
-    padding: 16,
-    borderLeftWidth: 4,
-    alignItems: "center",
-  },
-
-  statCount: {
-    color: "white",
-    fontSize: 28,
-    fontWeight: "900",
-    marginVertical: 8,
-  },
-
-  statLabel: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-
-  /* ======================
-     AGGIUNTA RAPIDA
-  ====================== */
-
-  quickRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-
-  quickAdd: {
-    flex: 1,
-    minHeight: 120,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 20,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: 'center',
-  },
-
-  quickAddIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-
-  quickAddPlus: {
-    fontSize: 24,
-    fontWeight: "900",
-    color: "white",
+  eventLiveCard: {
+    marginHorizontal: 12,
+    marginTop: 12,
     marginBottom: 4,
-  },
-
-  quickAddLabel: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-
-  /* ======================
-     GUARDAROBA
-  ====================== */
-
-  giantButton: {
-    width: "100%",
-    maxWidth: 320,
-    aspectRatio: 1,
-    backgroundColor: "#6D5BFF",
-    borderRadius: 40,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#6D5BFF",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-
-  giantPlus: {
-    fontSize: 28,
-    fontWeight: "900",
-    color: "white",
-    marginTop: 16,
-  },
-
-  giantSub: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.8)",
-    marginTop: 8,
-  },
-
-  recentList: {
-    marginTop: 32,
-    width: "100%",
-  },
-
-  recentTitle: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "800",
-    marginBottom: 12,
-  },
-
-  recentItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    padding: 16,
-    borderRadius: 16,
-    gap: 12,
-  },
-
-  recentText: {
-    flex: 1,
-    color: "white",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-
-  recentTime: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 13,
-  },
-
-  /* ======================
-     TAVOLI
-  ====================== */
-
-  tableCard: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
-  },
-
-  tableCardPaid: {
-    opacity: 0.6,
-  },
-
-  tableHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 16,
-  },
-
-  tableTitle: {
-    color: "white",
-    fontSize: 20,
-    fontWeight: "900",
-    marginBottom: 8,
-  },
-
-  tableProgress: {
-    gap: 8,
-  },
-
-  progressBar: {
-    width: 150,
-    height: 6,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    borderRadius: 3,
-    overflow: "hidden",
-  },
-
-  progressFill: {
-    height: "100%",
-    backgroundColor: "#22c55e",
-    borderRadius: 3,
-  },
-
-  tableInfo: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-
-  tableNumberBadge: {
-    backgroundColor: "#6D5BFF",
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  tableNumber: {
-    color: "white",
-    fontSize: 20,
-    fontWeight: "900",
-  },
-
-  tableActions: {
-    flexDirection: "row",
-    gap: 12,
-  },
-
-  tableButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 14,
     borderRadius: 14,
+    padding: 12,
+    gap: 4,
   },
 
-  tableButtonText: {
-    color: "white",
-    fontWeight: "800",
-    fontSize: 14,
-  },
-
-  confirmButton: {
-    backgroundColor: "#22c55e",
-  },
-
-  assignButton: {
-    backgroundColor: "#6D5BFF",
-  },
-
-  moneyButton: {
-    backgroundColor: "#3B82F6",
-  },
-
-  payButton: {
-    backgroundColor: "#22c55e",
-  },
-
-  /* ======================
-     CAMERIERE - BUDGET
-  ====================== */
-
-  budgetBadge: {
-    alignItems: "flex-end",
-  },
-
-  budgetAmount: {
-    color: "#22c55e",
-    fontSize: 24,
-    fontWeight: "900",
-  },
-
-  paidBadge: {
+  eventLiveHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginTop: 6,
-    backgroundColor: "rgba(34,197,94,0.2)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    justifyContent: "space-between",
   },
 
-  paidText: {
-    color: "#22c55e",
+  eventLiveTitle: {
     fontSize: 12,
     fontWeight: "700",
+    opacity: 0.75,
   },
 
-  /* ======================
-     BAR
-  ====================== */
-
-  barStats: {
-    flexDirection: "row",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  barStatItem: {
-    flex: 1,
-    alignItems: "center",
-  },
-
-  barStatValue: {
-    color: "white",
-    fontSize: 32,
-    fontWeight: "900",
-  },
-
-  barStatLabel: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: 4,
-  },
-
-  barStatDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    marginHorizontal: 20,
-  },
-
-  priceGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 14,
-  },
-
-  priceButton: {
-    width: "48%",
-    minHeight: 120,
-    backgroundColor: "#6D5BFF",
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 12,
-    shadowColor: "#6D5BFF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-
-  priceValue: {
-    color: "white",
-    fontSize: 32,
-    fontWeight: "900",
-  },
-
-  priceLabel: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-
-  customPriceButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    backgroundColor: "rgba(109,91,255,0.15)",
-    borderWidth: 2,
-    borderColor: "#6D5BFF",
-    borderStyle: "dashed",
-    paddingVertical: 18,
-    borderRadius: 18,
-    marginTop: 14,
-  },
-
-  customPriceText: {
-    color: "#6D5BFF",
-    fontSize: 16,
+  eventLiveName: {
+    fontSize: 15,
     fontWeight: "800",
   },
 
-  /* ======================
-     LOGOUT BUTTONS
-  ====================== */
+  eventLiveError: {
+    color: "#EF4444",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+  roleContent: {
+    flex: 1,
+    paddingBottom: 14,
+  },
 
   bottomButtonsContainer: {
     position: "absolute",
@@ -1152,67 +599,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
 
-  logoutButton: {
+  logoutButtonFloating: {
+    width: "100%",
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#EF4444",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    shadowColor: "#EF4444",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-
-  logoutButtonText: {
-    color: "white",
-    fontWeight: "800",
-    fontSize: 14,
-  },
-
-  changeRoleButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(139,123,255,0.9)",
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    borderRadius: 12,
-    shadowColor: "#6D5BFF",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-    maxWidth: 220,
-  },
-
-  logoutButtonFloating: {
-    position: "absolute",
-    bottom: 30,
-    right: 24,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#EF4444",
+    backgroundColor: "#DC2626",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 12,
-    shadowColor: "#EF4444",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowColor: "#7f1d1d",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+
+  logoutButtonDisabled: {
+    opacity: 0.7,
   },
 
   logoutButtonFloatingText: {
     color: "white",
     fontWeight: "800",
-    fontSize: 15,
+    fontSize: 16,
+    letterSpacing: 0.2,
   },
-
-  
 });

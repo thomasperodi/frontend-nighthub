@@ -50,6 +50,13 @@ export default function HomeTab({
   const { theme } = useTheme();
   const [refreshing, setRefreshing] = useState(false);
 
+  const isEventVisibleByStatus = (status?: string) => {
+    const normalized = String(status ?? '').trim().toUpperCase();
+    if (!normalized) return true;
+    if (normalized === 'CLOSED') return false;
+    return normalized === 'LIVE' || normalized === 'SCHEDULED' || normalized === 'DRAFT';
+  };
+
   const {
     data: eventsData,
     loading: eventsLoading,
@@ -202,7 +209,9 @@ export default function HomeTab({
       };
     };
 
-    return events.map((e) => {
+    return events
+      .filter((e) => isEventVisibleByStatus((e as any)?.status))
+      .map((e) => {
       const venue = e.venue_id ? venueById.get(e.venue_id) : undefined;
       const mergedPromos: ApiPromo[] = [
         ...(e.promos ?? []),
@@ -226,6 +235,9 @@ export default function HomeTab({
     });
   }, [eventsData, promosData, venuesData]);
 
+  const hasPromos = promosUi.length > 0;
+  const blockingError = eventsError || venuesError;
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = eventsUi.filter((e) => {
@@ -244,21 +256,21 @@ export default function HomeTab({
       list = [...list].sort((a, b) => b.title.localeCompare(a.title));
     }
 
-    if (promoFilter) {
+    if (promoFilter && hasPromos) {
       list = list.filter((e) => e.promos && e.promos.some((p: any) => p.id === promoFilter));
     }
 
-    if (filters.onlyMyPromos) {
+    if (filters.onlyMyPromos && hasPromos) {
       const userSet = new Set(userPromos);
       list = list.filter((e) => e.promos && e.promos.some((p: any) => userSet.has(p.id)));
     }
 
-    if (filters.promoTypes && filters.promoTypes.length) {
+    if (filters.promoTypes && filters.promoTypes.length && hasPromos) {
       const typeSet = new Set(filters.promoTypes);
       list = list.filter((e) => e.promos && e.promos.some((p: any) => typeSet.has(p.title)));
     }
     return list;
-  }, [query, filters, sortOrder, promoFilter, userPromos, eventsUi]);
+  }, [query, filters, sortOrder, promoFilter, userPromos, eventsUi, hasPromos]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -283,15 +295,16 @@ export default function HomeTab({
 
     return (
       <View>
-        {promosUi.length ? (
+        {hasPromos ? (
           <View style={{ paddingVertical: 16 }}>
             <FeaturedCarousel data={promosUi} onPress={(p: any) => onPromoPress(p)} />
           </View>
         ) : null}
 
-        {promoFilter ? (
+        {hasPromos && promoFilter ? (
           (() => {
             const activePromo = promosUi.find((x) => x.id === promoFilter);
+            if (!activePromo) return null;
             return (
               <View style={{ paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', alignItems: 'center' }}>
                 <View style={{ flex: 1 }}>
@@ -314,7 +327,7 @@ export default function HomeTab({
           })()
         ) : null}
 
-        {filters.promoTypes && filters.promoTypes.length ? (
+        {hasPromos && filters.promoTypes && filters.promoTypes.length ? (
           <View style={{ paddingHorizontal: 18, paddingVertical: 10 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
@@ -358,14 +371,14 @@ export default function HomeTab({
           </View>
         ) : null}
 
-        {(eventsError || promosError || venuesError) ? (
+        {blockingError ? (
           <View style={{ paddingVertical: 16, paddingHorizontal: 16, borderRadius: 16, backgroundColor: theme.colors.card, borderWidth: 1, borderColor: theme.colors.border, marginTop: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
               <Feather name="alert-circle" size={20} color={theme.colors.primary} />
               <Text style={{ color: theme.colors.text, fontWeight: '700', marginLeft: 8, fontSize: 15 }}>Errore nel caricamento</Text>
             </View>
             <Text style={{ color: theme.colors.muted, marginTop: 4, fontSize: 13, lineHeight: 18 }} numberOfLines={3}>
-              {eventsError || promosError || venuesError}
+              {blockingError}
             </Text>
             <TouchableOpacity
               onPress={() => onRefresh()}
@@ -382,7 +395,7 @@ export default function HomeTab({
         <View style={styles.resultsRow}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
             <Text style={[styles.resultsText, { color: theme.colors.text, fontWeight: '700' }]}>{filtered.length} {filtered.length === 1 ? 'risultato' : 'risultati'}</Text>
-            {filters.onlyMyPromos && (
+            {hasPromos && filters.onlyMyPromos && (
               <View style={{ marginLeft: 8, paddingVertical: 4, paddingHorizontal: 10, backgroundColor: theme.colors.primary + '22', borderRadius: 12, borderWidth: 1, borderColor: theme.colors.primary + '44' }}>
                 <Text style={{ color: theme.colors.primary, fontWeight: '700', fontSize: 12 }}>Con le mie offerte</Text>
               </View>

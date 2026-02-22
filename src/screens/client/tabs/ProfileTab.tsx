@@ -12,6 +12,8 @@ interface ProfileTabProps {
 export default function ProfileTab({ navigation }: ProfileTabProps) {
   const { theme } = useTheme();
   const { signOut, user } = useAuth();
+  const displayEmail = user?.email || "email@example.com";
+  const displayName = user?.email?.split("@")[0] || "Utente";
 
   const confirmDelete = () => {
     Alert.alert('Elimina account', 'Sei sicuro di voler eliminare il tuo account? Questa azione è irreversibile.', [
@@ -31,91 +33,111 @@ export default function ProfileTab({ navigation }: ProfileTabProps) {
     ]);
   };
 
-  const menuItems = [
+  const accountItems = [
     {
       icon: 'calendar' as const,
       label: 'Le mie prenotazioni',
+      description: 'Storico e stato dei tuoi ingressi e tavoli',
       onPress: () => navigation.navigate('Reservations'),
       color: theme.colors.primary,
     },
     {
       icon: 'play-circle' as const,
       label: 'Rivedi onboarding',
+      description: 'Ripassa funzionalità e suggerimenti principali',
       onPress: () => navigation.navigate('Onboarding'),
       color: theme.colors.primary,
     },
+  ];
+
+  const supportItems = [
     {
       icon: 'settings' as const,
       label: 'Impostazioni',
-      onPress: () => {},
+      description: 'Tema, notifiche e preferenze account',
+      onPress: () => navigation.navigate('Settings'),
       color: theme.colors.muted,
     },
     {
       icon: 'help-circle' as const,
       label: 'Aiuto e supporto',
-      onPress: () => {},
+      description: 'FAQ, contatti e assistenza rapida',
+      onPress: () => navigation.navigate('HelpSupport'),
       color: theme.colors.muted,
     },
     {
       icon: 'log-out' as const,
       label: 'Esci',
+      description: 'Termina la sessione su questo dispositivo',
       onPress: () => signOut(),
       color: theme.colors.muted,
-      isDestructive: false,
     },
   ];
+
+  const renderMenuItem = (item: {
+    icon: React.ComponentProps<typeof Feather>["name"];
+    label: string;
+    description: string;
+    onPress: () => void;
+    color: string;
+  }) => (
+    <TouchableOpacity
+      key={item.label}
+      style={[styles.menuItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
+      onPress={item.onPress}
+      activeOpacity={0.75}
+    >
+      <View style={[styles.menuIconContainer, { backgroundColor: item.color + '22' }]}>
+        <Feather name={item.icon} size={20} color={item.color} />
+      </View>
+      <View style={styles.menuTextWrap}>
+        <Text style={[styles.menuLabel, { color: theme.colors.text }]}>{item.label}</Text>
+        <Text style={[styles.menuDescription, { color: theme.colors.muted }]} numberOfLines={1}>{item.description}</Text>
+      </View>
+      <Feather name="chevron-right" size={18} color={theme.colors.muted} />
+    </TouchableOpacity>
+  );
 
   return (
     <ScrollView 
       style={{ flex: 1 }} 
-      contentContainerStyle={{ paddingBottom: 100 }}
+      contentContainerStyle={{ paddingBottom: 120 }}
       showsVerticalScrollIndicator={false}
     >
       <View style={{ padding: 20 }}>
-        {/* Header Profilo */}
         <View style={[styles.profileHeader, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
           <View style={[styles.avatarContainer, { backgroundColor: theme.colors.primary + '22' }]}>
             <Feather name="user" size={32} color={theme.colors.primary} />
           </View>
           <View style={styles.profileInfo}>
             <Text style={[styles.profileName, { color: theme.colors.text }]}>
-              {user?.email || 'Utente'}
+              {displayName}
             </Text>
             <Text style={[styles.profileEmail, { color: theme.colors.muted }]}>
-              {user?.email || 'email@example.com'}
+              {displayEmail}
             </Text>
           </View>
         </View>
 
-        {/* Menu Items */}
         <View style={{ marginTop: 24 }}>
-          {menuItems.map((item, index) => (
-            <TouchableOpacity
-              key={index}
-              style={[styles.menuItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
-              onPress={item.onPress}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.menuIconContainer, { backgroundColor: item.color + '22' }]}>
-                <Feather name={item.icon} size={20} color={item.color} />
-              </View>
-              <Text style={[styles.menuLabel, { color: theme.colors.text }]}>{item.label}</Text>
-              <Feather name="chevron-right" size={18} color={theme.colors.muted} />
-            </TouchableOpacity>
-          ))}
+          <Text style={[styles.sectionLabel, { color: theme.colors.muted }]}>Account</Text>
+          {accountItems.map(renderMenuItem)}
         </View>
 
-        {/* Elimina Account */}
+        <View style={{ marginTop: 16 }}>
+          <Text style={[styles.sectionLabel, { color: theme.colors.muted }]}>Supporto</Text>
+          {supportItems.map(renderMenuItem)}
+        </View>
+
         <TouchableOpacity
-          style={[styles.deleteButton, { borderColor: '#FF4D4F' + '44' }]}
+          style={[styles.deleteButton, { borderColor: theme.colors.error + '44', backgroundColor: theme.colors.error + '10' }]}
           onPress={confirmDelete}
           activeOpacity={0.8}
         >
-          <Feather name="trash-2" size={18} color="#FF4D4F" />
-          <Text style={[styles.deleteButtonText, { color: '#FF4D4F' }]}>Elimina account</Text>
+          <Feather name="trash-2" size={18} color={theme.colors.error} />
+          <Text style={[styles.deleteButtonText, { color: theme.colors.error }]}>Elimina account</Text>
         </TouchableOpacity>
 
-        {/* Versione */}
         <View style={{ marginTop: 32, alignItems: 'center' }}>
           <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '500' }}>Versione app 1.0.0</Text>
         </View>
@@ -145,13 +167,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileName: {
-    fontSize: 20,
+    fontSize: 21,
     fontWeight: '800',
     marginBottom: 4,
+    textTransform: 'capitalize',
   },
   profileEmail: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   menuItem: {
     flexDirection: 'row',
@@ -169,10 +199,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  menuLabel: {
+  menuTextWrap: {
     flex: 1,
+    marginRight: 8,
+  },
+  menuLabel: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  menuDescription: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: '500',
   },
   deleteButton: {
     flexDirection: 'row',
@@ -182,7 +220,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     marginTop: 24,
-    backgroundColor: '#FF4D4F' + '10',
   },
   deleteButtonText: {
     fontSize: 15,

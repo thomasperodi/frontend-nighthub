@@ -35,6 +35,16 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
     });
 
   const isCheckedIn = Boolean(res.checked_in_at);
+  const isEntryReservation = res.type === 'entry';
+  const hasStripeTicket = Boolean(
+    res.ticket_order?.id ||
+    res.ticket_order_id ||
+    res.stripe_session_id ||
+    res.stripe_payment_intent ||
+    res.payment_provider === 'stripe' ||
+    res.payment_method === 'stripe',
+  );
+  const isCancellationBlocked = isCheckedIn || isEntryReservation || hasStripeTicket;
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=800x800&data=${encodeURIComponent(qrValue)}`;
 
   const eventName = res.event?.name ?? res.event_id;
@@ -42,6 +52,13 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
     ? `Tavolo ${res.venue_table.numero}`
     : res.venue_table?.nome ?? 'Tavolo';
   const zoneLabel = res.venue_table?.zona ?? '';
+
+  const cancellationBlockReason = (() => {
+    if (isCheckedIn) return 'Prenotazione completata';
+    if (hasStripeTicket) return 'I ticket acquistati con Stripe non sono annullabili dal cliente';
+    if (isEntryReservation) return 'Gli ingressi in lista non sono annullabili dal cliente';
+    return null;
+  })();
 
   const showMessage = (message: string) => {
     if (Platform.OS === 'android') {
@@ -149,23 +166,37 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
           ) : null}
         </View>
 
+        {cancellationBlockReason ? (
+          <View style={[styles.policyCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
+            <View style={styles.policyRow}>
+              <Feather name="shield" size={16} color={theme.colors.muted} />
+              <Text style={[styles.policyText, { color: theme.colors.muted }]}>{cancellationBlockReason}</Text>
+            </View>
+          </View>
+        ) : null}
+
         <TouchableOpacity
           style={[
             styles.cancelBtn,
             {
-              backgroundColor: isCheckedIn ? theme.colors.card : theme.colors.primary,
+              backgroundColor: isCancellationBlocked ? theme.colors.card : theme.colors.primary,
               borderColor: theme.colors.border,
             },
           ]}
           onPress={async () => {
-            if (isCheckedIn) return;
-            await cancelReservation(id);
-            await load();
+            if (isCancellationBlocked) return;
+            try {
+              await cancelReservation(id);
+              await load();
+              showMessage('Prenotazione annullata');
+            } catch {
+              Alert.alert('Operazione non disponibile', 'Questa prenotazione non può essere annullata dal cliente.');
+            }
           }}
-          disabled={isCheckedIn}
+          disabled={isCancellationBlocked}
         >
-          <Text style={{ color: isCheckedIn ? theme.colors.muted : theme.colors.text, fontWeight: '800' }}>
-            {isCheckedIn ? 'Prenotazione completata' : 'Annulla prenotazione'}
+          <Text style={{ color: isCancellationBlocked ? theme.colors.muted : theme.colors.text, fontWeight: '800' }}>
+            {isCancellationBlocked ? 'Annullamento non disponibile' : 'Annulla prenotazione'}
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -214,6 +245,9 @@ const styles = StyleSheet.create({
   actionBtnText: { fontSize: 13, fontWeight: '800' },
   actionBtnGhost: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, borderWidth: 1, paddingVertical: 11, paddingHorizontal: 12, flex: 1 },
   actionGhostText: { fontSize: 13, fontWeight: '700' },
+  policyCard: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  policyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  policyText: { fontSize: 12, fontWeight: '700', flex: 1 },
   cancelBtn: { marginTop: 2, borderRadius: 12, paddingVertical: 13, alignItems: 'center', borderWidth: 1 },
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)' },
   modalInner: { marginHorizontal: 18, marginVertical: 24, borderRadius: 16, padding: 16, alignItems: 'center', flex: 1, justifyContent: 'center' },

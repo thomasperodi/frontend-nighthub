@@ -46,6 +46,13 @@ export default function ClientHomeScreen({ route }: any) {
   }, []);
 
   useEffect(() => {
+    if (userPromos.length === 0) {
+      setPromoFilter(null);
+      setFilters((prev) => ({ ...prev, onlyMyPromos: false, promoTypes: [] }));
+    }
+  }, [userPromos.length]);
+
+  useEffect(() => {
     if (route?.params?.promoFilter) {
       setPromoFilter(route.params.promoFilter);
     }
@@ -129,6 +136,7 @@ export default function ClientHomeScreen({ route }: any) {
         onClose={() => setFiltersOpen(false)}
         onApply={(f: any) => setFilters(f)}
         initial={filters}
+        enablePromoFilters={userPromos.length > 0}
       />
 
       <BottomNav items={clientItems} active={currentTab} onChange={setCurrentTab} />

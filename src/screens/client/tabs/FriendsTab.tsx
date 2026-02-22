@@ -17,53 +17,7 @@ import {
   sendFriendRequest,
 } from "../../../services/friends";
 // Mock data - Amici
-const MOCK_FRIENDS = [
-  {
-    id: 1,
-    name: "Marco Rossi",
-    online: true,
-    currentVenue: "Club Luna",
-    status: "In un evento",
-    avatar: "👨",
-    lastSeen: null,
-  },
-  {
-    id: 2,
-    name: "Giulia Bianchi",
-    online: true,
-    currentVenue: "The Club",
-    status: "Con amici",
-    avatar: "👩",
-    lastSeen: null,
-  },
-  {
-    id: 3,
-    name: "Alessandro Verdi",
-    online: true,
-    currentVenue: "Club Luna",
-    status: "Sola/solo",
-    avatar: "👨",
-    lastSeen: null,
-  },
-  {
-    id: 4,
-    name: "Sofia Romano",
-    online: false,
-    currentVenue: null,
-    status: null,
-    avatar: "👩",
-    lastSeen: "2 ore fa",
-  },
-  {
-    id: 5,
-    name: "Luca Ferrari",
-    online: false,
-    currentVenue: null,
-    status: null,
-    avatar: "👨",
-    lastSeen: "1 giorno fa",
-  },
-];
+
 
 type FriendItem = {
   id: string;
@@ -99,41 +53,6 @@ type GroupItem = {
   createdAt: Date;
 };
 
-// Mock data - Persone da aggiungere
-const MOCK_USERS_TO_ADD = [
-  { id: 101, name: "Chiara Moretti", avatar: "👩", isFriend: false, mutualFriendsIds: [1, 4] },
-  { id: 102, name: "Matteo De Luca", avatar: "👨", isFriend: false, mutualFriendsIds: [2, 5] },
-  { id: 103, name: "Elena Costa", avatar: "👩", isFriend: false, mutualFriendsIds: [1, 2, 3] },
-  { id: 104, name: "Davide Gallo", avatar: "👨", isFriend: false, mutualFriendsIds: [3] },
-  { id: 105, name: "Francesca Rizzo", avatar: "👩", isFriend: false, mutualFriendsIds: [1, 2] },
-];
-
-// Mock data - Richieste di amicizia
-const MOCK_FRIEND_REQUESTS = [
-  { id: 201, name: "Valentina Russo", avatar: "👩", sentAt: "1 ora fa" },
-  { id: 202, name: "Andrea Colombo", avatar: "👨", sentAt: "3 ore fa" },
-];
-
-// Mock data - Gruppi di amici
-const MOCK_GROUPS = [
-  {
-    id: 1,
-    name: "Crew Universitaria",
-    avatar: "👥",
-    members: [1, 2, 3],
-    color: "#6D5BFF",
-    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-  },
-  {
-    id: 2,
-    name: "Calcetto",
-    avatar: "⚽",
-    members: [1, 5],
-    color: "#3B82F6",
-    createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-  },
-];
-
 // Mock data - Locali disponibili
 const MOCK_VENUES = [
   { id: 1, name: "Club Luna", avatar: "🌙", price: "€€" },
@@ -146,35 +65,13 @@ export default function FriendsTab() {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const insets = useSafeAreaInsets();
   const bottomActionOffset = Math.max(insets.bottom, 16) + 90;
-  const [friends, setFriends] = useState<FriendItem[]>(
-    MOCK_FRIENDS.map((f) => ({
-      ...f,
-      id: String(f.id),
-    }))
-  );
-  const [friendRequests, setFriendRequests] = useState<FriendRequestItem[]>(
-    MOCK_FRIEND_REQUESTS.map((r) => ({
-      ...r,
-      id: String(r.id),
-    }))
-  );
-  const [usersToAdd, setUsersToAdd] = useState<UserSearchItem[]>(
-    MOCK_USERS_TO_ADD.map((u) => ({
-      ...u,
-      id: String(u.id),
-      mutualFriendsIds: (u.mutualFriendsIds || []).map((id) => String(id)),
-    }))
-  );
-  const [groups, setGroups] = useState<GroupItem[]>(
-    MOCK_GROUPS.map((g) => ({
-      ...g,
-      id: String(g.id),
-      members: g.members.map((id) => String(id)),
-    }))
-  );
-  const [loadingFriends, setLoadingFriends] = useState(false);
-  const [loadingRequests, setLoadingRequests] = useState(false);
-  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [friendRequests, setFriendRequests] = useState<FriendRequestItem[]>([]);
+  const [usersToAdd, setUsersToAdd] = useState<UserSearchItem[]>([]);
+  const [groups, setGroups] = useState<GroupItem[]>([]);
+  const [loadingFriends, setLoadingFriends] = useState(true);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [loadingGroups, setLoadingGroups] = useState(true);
   const [loadingSearch, setLoadingSearch] = useState(false);
   
   const [activeTab, setActiveTab] = useState<"friends" | "groups">("friends");
@@ -236,7 +133,9 @@ export default function FriendsTab() {
           }))
         );
       } catch {
-        // fallback to mock data already in state
+        setFriends([]);
+        setFriendRequests([]);
+        setGroups([]);
       } finally {
         setLoadingFriends(false);
         setLoadingRequests(false);
@@ -299,7 +198,7 @@ export default function FriendsTab() {
           text: "OK",
           onPress: () => {
             setUsersToAdd(prev => prev.map(u => 
-              u.id === userId ? { ...u, isFriend: true } : u
+              u.id === String(userId) ? { ...u, isFriend: true } : u
             ));
             setSelectedProfile(null);
           }

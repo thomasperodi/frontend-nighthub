@@ -28,6 +28,8 @@ export default function ReservationsScreen({ navigation }: any) {
     return theme.colors.muted;
   };
 
+  const canCancelFromClient = (item: any) => item?.type === 'table' && item?.status !== 'completed' && item?.status !== 'cancelled';
+
   const formatDate = (value?: string) => {
     if (!value) return 'Data non disponibile';
     const d = new Date(value);
@@ -54,6 +56,17 @@ export default function ReservationsScreen({ navigation }: any) {
         renderItem={({ item }) => (
           <TouchableOpacity onPress={() => navigation.navigate('ReservationDetail', { id: item.id })} style={[styles.row, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
             <View style={{ flex: 1 }}>
+              <View style={styles.rowTopMeta}>
+                <View style={[styles.typePill, { borderColor: theme.colors.border, backgroundColor: theme.colors.background }]}> 
+                  <Text style={[styles.typePillText, { color: theme.colors.text }]}>{item.type === 'table' ? 'Tavolo' : 'Ingresso'}</Text>
+                </View>
+                {!canCancelFromClient(item) ? (
+                  <View style={[styles.lockPill, { borderColor: theme.colors.border }]}> 
+                    <Feather name="lock" size={11} color={theme.colors.muted} />
+                    <Text style={[styles.lockPillText, { color: theme.colors.muted }]}>Non annullabile</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text style={[styles.eventName, { color: theme.colors.text }]} numberOfLines={1}>{item.event?.name ?? item.event_id}</Text>
               <Text style={[styles.eventDate, { color: theme.colors.muted }]}>{formatDate(item.event?.date)}</Text>
               {item.type === 'table' ? (
@@ -63,7 +76,7 @@ export default function ReservationsScreen({ navigation }: any) {
                   {item.guests ? ` • ${item.guests} ospiti` : ''}
                 </Text>
               ) : (
-                <Text style={[styles.metaText, { color: theme.colors.muted }]}>Ingresso con QR{item.total_amount ? ` • €${Number(item.total_amount).toFixed(2)}` : ''}</Text>
+                <Text style={[styles.metaText, { color: theme.colors.muted }]}>Biglietto con QR{item.total_amount ? ` • €${Number(item.total_amount).toFixed(2)}` : ''}</Text>
               )}
             </View>
 
@@ -95,6 +108,11 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '900' },
   subtitle: { marginTop: 4, fontSize: 13 },
   row: { padding: 14, borderWidth: 1, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  rowTopMeta: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
+  typePill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  typePillText: { fontSize: 11, fontWeight: '800' },
+  lockPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  lockPillText: { fontSize: 11, fontWeight: '700' },
   eventName: { fontWeight: '800', fontSize: 15 },
   eventDate: { marginTop: 2, fontSize: 12, fontWeight: '700' },
   metaText: { marginTop: 4, fontSize: 13 },

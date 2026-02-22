@@ -8,7 +8,7 @@ const CATEGORIES = ["Musica", "Dj set", "Live", "Latino", "Elettronica", "House"
 import { MOCK_EVENTS } from "../data/mockEvents";
 const PROMO_TYPES = Array.from(new Set(MOCK_EVENTS.flatMap(e => (e.promos || []).map((p:any) => p.title))));
 
-export default function FilterModal({ visible, onClose, onApply, initial }: any) {
+export default function FilterModal({ visible, onClose, onApply, initial, enablePromoFilters = true }: any) {
   const { theme, isDark } = useTheme();
   const [selected, setSelected] = useState<string[]>(initial?.categories || []);
   const [onlyMyPromos, setOnlyMyPromos] = useState<boolean>(initial?.onlyMyPromos || false);
@@ -44,21 +44,25 @@ export default function FilterModal({ visible, onClose, onApply, initial }: any)
               ))}
             </View>
 
-            <View style={{ marginTop: 12 }}>
-              <Text style={[{ color: theme.colors.muted, marginBottom: 8 }]}>Filtra per tipo di promozione</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                {PROMO_TYPES.length ? PROMO_TYPES.map((p) => (
-                  <TouchableOpacity key={p} onPress={() => togglePromoType(p)} style={[styles.chip, { borderColor: theme.colors.border }, promoTypes.includes(p) && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary } ]}>
-                    <Text style={[{ color: theme.colors.text }]}>{p}</Text>
-                  </TouchableOpacity>
-                )) : <Text style={{ color: theme.colors.muted }}>Nessuna promozione tra gli eventi</Text>}
-              </View>
-            </View>
+            {enablePromoFilters ? (
+              <>
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[{ color: theme.colors.muted, marginBottom: 8 }]}>Filtra per tipo di promozione</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                    {PROMO_TYPES.length ? PROMO_TYPES.map((p) => (
+                      <TouchableOpacity key={p} onPress={() => togglePromoType(p)} style={[styles.chip, { borderColor: theme.colors.border }, promoTypes.includes(p) && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary } ]}>
+                        <Text style={[{ color: theme.colors.text }]}>{p}</Text>
+                      </TouchableOpacity>
+                    )) : <Text style={{ color: theme.colors.muted }}>Nessuna promozione tra gli eventi</Text>}
+                  </View>
+                </View>
 
-            <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={[{ color: theme.colors.text, fontWeight: '700' }]}>Solo eventi con le mie promozioni</Text>
-              <Switch value={onlyMyPromos} onValueChange={setOnlyMyPromos} thumbColor={isDark ? undefined : theme.colors.primary} trackColor={{ true: theme.colors.primary, false: theme.colors.border }} />
-            </View>
+                <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={[{ color: theme.colors.text, fontWeight: '700' }]}>Solo eventi con le mie promozioni</Text>
+                  <Switch value={onlyMyPromos} onValueChange={setOnlyMyPromos} thumbColor={isDark ? undefined : theme.colors.primary} trackColor={{ true: theme.colors.primary, false: theme.colors.border }} />
+                </View>
+              </>
+            ) : null}
           </ScrollView>
 
           <View style={styles.actions}>

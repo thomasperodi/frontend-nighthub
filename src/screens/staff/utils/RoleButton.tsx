@@ -1,11 +1,14 @@
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useRef } from "react";
+import { useTheme } from "../../../theme/ThemeProvider";
 
-export default function RoleButton({ icon, label, description, onPress }: any) {
+export default function RoleButton({ icon, label, description, onPress, disabled = false }: any) {
+  const { theme } = useTheme();
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
+    if (disabled) return;
     Animated.spring(scaleAnim, {
       toValue: 0.95,
       useNativeDriver: true,
@@ -13,6 +16,7 @@ export default function RoleButton({ icon, label, description, onPress }: any) {
   };
 
   const handlePressOut = () => {
+    if (disabled) return;
     Animated.spring(scaleAnim, {
       toValue: 1,
       friction: 3,
@@ -23,25 +27,37 @@ export default function RoleButton({ icon, label, description, onPress }: any) {
 
   return (
     <TouchableOpacity 
-      onPress={onPress}
+      onPress={disabled ? undefined : onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
-      activeOpacity={0.95}
+      activeOpacity={disabled ? 1 : 0.95}
       hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
       accessibilityRole="button"
       accessibilityLabel={`${label}, ${description}`}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
     >
-      <Animated.View style={[styles.roleButton, { transform: [{ scale: scaleAnim }] }]}>
+      <Animated.View
+        style={[
+          styles.roleButton,
+          {
+            transform: [{ scale: scaleAnim }],
+            backgroundColor: theme.colors.card,
+            borderColor: theme.colors.border,
+            opacity: disabled ? 0.55 : 1,
+          },
+        ]}
+      >
         <View style={styles.roleLeft}>
-          <View style={styles.roleIconContainer}>
+          <View style={[styles.roleIconContainer, disabled && styles.roleIconContainerDisabled]}>
             <Feather name={icon} size={24} color="white" />
           </View>
           <View style={styles.roleText}>
-            <Text style={styles.roleLabel}>{label}</Text>
-            <Text style={styles.roleDescription}>{description}</Text>
+            <Text style={[styles.roleLabel, { color: theme.colors.text }]}>{label}</Text>
+            <Text style={[styles.roleDescription, { color: theme.colors.text }]}>{description}</Text>
           </View>
         </View>
-        <Feather name="chevron-right" size={20} color="white" />
+        <Feather name="chevron-right" size={20} color={theme.colors.text} style={{ opacity: 0.75 }} />
       </Animated.View>
     </TouchableOpacity>
   );
@@ -52,12 +68,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "rgba(255,255,255,0.08)",
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
   },
 
   roleLeft: {
@@ -76,20 +90,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+  roleIconContainerDisabled: {
+    backgroundColor: "#8b8b8b",
+  },
+
   roleText: {
     flex: 1,
   },
 
   roleLabel: {
-    color: "white",
     fontSize: 16,
     fontWeight: "800",
     marginBottom: 2,
   },
 
   roleDescription: {
-    color: "rgba(255,255,255,0.7)",
     fontSize: 13,
     fontWeight: "500",
+    opacity: 0.75,
   },
 });
