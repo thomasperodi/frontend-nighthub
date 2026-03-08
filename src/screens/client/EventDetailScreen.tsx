@@ -16,7 +16,24 @@ import { resolveEventImageUri } from "../../utils/media";
 import { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 import { confirmPaymentIntent, createPaymentSheetIntent } from "../../services/payments";
-import { initStripe, useStripe } from "@stripe/stripe-react-native";
+import { initStripe, LinkDisplay, useStripe } from "@stripe/stripe-react-native";
+
+function calculateTotalAmount({
+  ticketPriceCents,
+  platformFeeCents,
+  stripePercentage,
+  stripeFixedCents,
+}: {
+  ticketPriceCents: number;
+  platformFeeCents: number;
+  stripePercentage: number;
+  stripeFixedCents: number;
+}) {
+  return Math.ceil(
+    (ticketPriceCents + platformFeeCents + stripeFixedCents) /
+      (1 - stripePercentage),
+  );
+}
 
 export default function EventDetailScreen({ route, navigation }: any) {
   const { item } = route.params;
@@ -126,9 +143,9 @@ export default function EventDetailScreen({ route, navigation }: any) {
 
       // show confirmation toast (Android) or alert (iOS)
       if (Platform.OS === 'android') {
-        ToastAndroid.show('Prenotazione confermata', ToastAndroid.SHORT);
+        ToastAndroid.show('Richiesta tavolo inviata', ToastAndroid.SHORT);
       } else {
-        Alert.alert('Prenotazione confermata', 'La tua prenotazione è stata confermata.');
+        Alert.alert('Richiesta inviata', 'La richiesta tavolo è stata inviata. Il locale confermerà la prenotazione.');
       }
     } catch (e: any) {
       const status = e?.response?.status;
@@ -274,6 +291,18 @@ export default function EventDetailScreen({ route, navigation }: any) {
       ? Number(display.raw.presale_capacity)
       : null;
   const presaleSold = Number(display.raw?.presale_sold ?? 0);
+  const ticketPriceCents = Math.round(Math.max(presalePrice, 0) * presaleQuantity * 100);
+  const platformFeeCents = 0;
+  const estimatedTotalCents = calculateTotalAmount({
+    ticketPriceCents,
+    platformFeeCents,
+    stripePercentage: 0.0525,
+    stripeFixedCents: 25,
+  });
+  const estimatedServiceFeeCents = Math.max(estimatedTotalCents - ticketPriceCents, 0);
+  const ticketPriceTotal = (ticketPriceCents / 100).toFixed(2);
+  const serviceFeeTotal = (estimatedServiceFeeCents / 100).toFixed(2);
+  const totalAmount = (estimatedTotalCents / 100).toFixed(2);
 
   const buyPresale = async () => {
     if (!user?.id) {
@@ -298,7 +327,6 @@ export default function EventDetailScreen({ route, navigation }: any) {
 
       await initStripe({
         publishableKey: process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
-        merchantIdentifier: 'merchant.com.perodithomas.nighthub',
         urlScheme: stripeReturnScheme,
         stripeAccountId: intent.stripe_account_id,
       });
@@ -307,6 +335,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
         merchantDisplayName: 'NightHub',
         paymentIntentClientSecret: intent.payment_intent_client_secret,
         allowsDelayedPaymentMethods: false,
+        link: { display: LinkDisplay.NEVER },
         returnURL: stripeReturnUrl,
       });
 
@@ -496,8 +525,27 @@ export default function EventDetailScreen({ route, navigation }: any) {
               </View>
             </View>
 
+            <View style={[styles.paymentInfoCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
+              <View style={styles.paymentInfoRow}>
+                <Text style={[styles.paymentInfoLabel, { color: theme.colors.muted }]}>Prezzo biglietto</Text>
+                <Text style={[styles.paymentInfoValue, { color: theme.colors.text }]}>{presaleCurrency} {ticketPriceTotal}</Text>
+              </View>
+              <View style={styles.paymentInfoRow}>
+                <Text style={[styles.paymentInfoLabel, { color: theme.colors.muted }]}>Commissione servizio</Text>
+                <Text style={[styles.paymentInfoValue, { color: theme.colors.text }]}>{presaleCurrency} {serviceFeeTotal}</Text>
+              </View>
+              <View style={styles.paymentInfoRow}>
+                <Text style={[styles.paymentInfoTotal, { color: theme.colors.text }]}>Totale finale</Text>
+                <Text style={[styles.paymentInfoTotal, { color: theme.colors.text }]}>{presaleCurrency} {totalAmount}</Text>
+              </View>
+              <View style={styles.paymentInfoRow}>
+                <Feather name="credit-card" size={15} color={theme.colors.primary} />
+                <Text style={[styles.paymentInfoHint, { color: theme.colors.muted }]}>Pagamento sicuro con carta</Text>
+              </View>
+            </View>
+
             <PrimaryButton
-              title={`Acquista prevendita • ${presaleCurrency} ${(presalePrice * presaleQuantity).toFixed(2)}`}
+              title={`Paga con carta • ${presaleCurrency} ${totalAmount}`}
               onPress={buyPresale}
               isLoading={isBuyingPresale}
               disabled={isBuyingPresale}
@@ -518,7 +566,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
             onPress={() => setBookingOpen(true)}
           >
             <Feather name="calendar" size={16} color={theme.colors.primary} />
-            <Text style={[styles.secondaryText, { color: theme.colors.text }]}>Riserva tavolo</Text>
+            <Text style={[styles.secondaryText, { color: theme.colors.text }]}>Richiedi tavolo</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -635,6 +683,37 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 15,
     fontWeight: '800',
+  },
+  paymentInfoCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+    marginBottom: 4,
+  },
+  paymentInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  paymentInfoLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  paymentInfoValue: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  paymentInfoTotal: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  paymentInfoHint: {
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
   secondaryBtn: {
     flex: 1,

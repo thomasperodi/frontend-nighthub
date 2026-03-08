@@ -3,7 +3,7 @@
     "name": "NightHub",
     "slug": "frontend-app",
     "scheme": "nighthub",
-    "version": "1.0.6",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,13 +20,12 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Consente di usare la fotocamera per scansionare i QR code degli eventi e delle promozioni all’interno dell’app.",
-        "NSPhotoLibraryUsageDescription": "Consente di selezionare immagini dalla libreria per caricare le locandine degli eventi pubblicati nell’app.",
-        "NSPhotoLibraryAddUsageDescription": "Consente di salvare nella libreria immagini delle locandine o dei contenuti evento generati dall’app.",
-        "NSLocationWhenInUseUsageDescription": "Usiamo la posizione per mostrare locali ed eventi nelle vicinanze e migliorare l'esperienza.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Usiamo la posizione anche in background per aggiornare la mappa e mostrarti locali e amici vicini.",
-        "NSLocationAlwaysUsageDescription": "Usiamo la posizione anche in background per aggiornare la mappa e mostrarti locali e amici vicini.",
-        "UIBackgroundModes": ["location", "remote-notification"]
+        "NSPhotoLibraryUsageDescription": "L'app accede alla libreria foto per permetterti di selezionare e caricare le locandine degli eventi che pubblichi. L'immagine selezionata verrà mostrata pubblicamente nella pagina dell’evento.",
+        "NSPhotoLibraryAddUsageDescription": "L'app può salvare nella tua libreria le locandine o i contenuti evento generati, solo dopo tua azione esplicita di salvataggio.",
+        "NSLocationWhenInUseUsageDescription": "La posizione viene utilizzata mentre usi l'app per mostrarti eventi e locali nelle vicinanze.",
+        "UIBackgroundModes": ["remote-notification"]
       }
+
     },
     "android": {
       "package": "com.perodithomas.nighthub",
@@ -57,14 +56,13 @@
       [
         "@stripe/stripe-react-native",
         {
-          "merchantIdentifier": "merchant.com.perodithomas.nighthub",
           "enableGooglePay": false
         }
       ],
       [
         "expo-media-library",
         {
-          "photosPermission": "Consenti accesso alla libreria per leggere le immagini.",
+          "photosPermission": "L'app accede alla tua libreria foto solo per permetterti di selezionare un'immagine (ad esempio la locandina di un evento) da caricare e pubblicare nella scheda evento.",
           "savePhotosPermission": "Consenti di salvare il QR code nella galleria.",
           "isAccessMediaLocationEnabled": true
         }

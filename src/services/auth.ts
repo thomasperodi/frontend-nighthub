@@ -14,7 +14,7 @@ export type RegisterPayload = {
   phone?: string;
   avatar?: string;
   sesso: 'M' | 'F' | 'ALTRO';
-  birth_date: string;
+  birth_date?: string;
   venue_id?: string;
 };
 

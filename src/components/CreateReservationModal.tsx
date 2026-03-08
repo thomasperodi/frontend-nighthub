@@ -18,6 +18,45 @@ import { createReservation } from '../services/reservations';
 import { listVenueTables } from '../services/tables';
 import type { VenueTable } from '../types/tables';
 
+type ZoneConfig = {
+  id: string;
+  label: string;
+  per_testa?: number | null;
+  costo_minimo?: number | null;
+  persone_max?: number | null;
+};
+
+function normalizeZoneLabel(table: VenueTable): string {
+  const z = String(table.zona ?? '').trim();
+  if (z.length) return z;
+  const n = String(table.nome ?? '').trim();
+  return n.length ? n : 'Senza zona';
+}
+
+function asNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toZones(rows: VenueTable[]): ZoneConfig[] {
+  const map = new Map<string, ZoneConfig>();
+  for (const row of rows) {
+    const label = normalizeZoneLabel(row);
+    const key = label.toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, {
+        id: row.id,
+        label,
+        per_testa: asNumber(row.per_testa),
+        costo_minimo: asNumber(row.costo_minimo),
+        persone_max: row.persone_max ?? null,
+      });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+}
+
 type Props = {
   visible: boolean;
   onClose: () => void;
@@ -40,14 +79,17 @@ export default function CreateReservationModal({
   const { theme } = useTheme();
   const [tables, setTables] = useState<VenueTable[]>([]);
   const [loadingTables, setLoadingTables] = useState(false);
+  const zones = useMemo(() => toZones(tables), [tables]);
 
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [guestsCount, setGuestsCount] = useState<string>('');
+  const [tableName, setTableName] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
 
   const reset = () => {
-    setSelectedTableId(null);
+    setSelectedZoneId(null);
     setGuestsCount('');
+    setTableName('');
   };
 
   useEffect(() => {
@@ -61,9 +103,13 @@ export default function CreateReservationModal({
       try {
         setLoadingTables(true);
         const list = await listVenueTables(venueId);
-        setTables(list || []);
+        const safeList = list || [];
+        setTables(safeList);
+        const availableZones = toZones(safeList);
+        setSelectedZoneId((prev) => prev ?? availableZones[0]?.id ?? null);
       } catch {
         setTables([]);
+        setSelectedZoneId(null);
       } finally {
         setLoadingTables(false);
       }
@@ -78,10 +124,32 @@ export default function CreateReservationModal({
       return;
     }
 
-    if (!selectedTableId) {
-      Alert.alert('Dati non validi', 'Seleziona un tavolo.');
+    if (!selectedZoneId) {
+      Alert.alert('Dati non validi', 'Seleziona una zona.');
       return;
     }
+
+    const selectedZone = zones.find((z) => z.id === selectedZoneId) ?? null;
+    if (!selectedZone) {
+      Alert.alert('Dati non validi', 'Zona non valida.');
+      return;
+    }
+
+    if (selectedZone.persone_max && guests > selectedZone.persone_max) {
+      Alert.alert('Dati non validi', `Massimo ${selectedZone.persone_max} persone per la zona selezionata.`);
+      return;
+    }
+
+    const computedTotal = (() => {
+      if (selectedZone.per_testa === null || selectedZone.per_testa === undefined) {
+        return selectedZone.costo_minimo ?? undefined;
+      }
+      const byGuest = selectedZone.per_testa * guests;
+      if (selectedZone.costo_minimo === null || selectedZone.costo_minimo === undefined) {
+        return byGuest;
+      }
+      return Math.max(byGuest, selectedZone.costo_minimo);
+    })();
 
     try {
       setSubmitting(true);
@@ -90,11 +158,14 @@ export default function CreateReservationModal({
         event_id: eventId,
         type: 'table',
         guests,
-        venue_table_id: selectedTableId,
+        venue_zone_id: selectedZoneId,
+        venue_table_id: selectedZoneId,
+        table_name: tableName.trim() || undefined,
         status: 'pending',
+        total_amount: computedTotal,
       });
 
-      Alert.alert('Prenotazione creata', 'La prenotazione è stata salvata.');
+      Alert.alert('Richiesta creata', 'Richiesta tavolo inviata. Il locale confermerà la prenotazione.');
       await Promise.resolve(onCreated?.());
       reset();
       onClose();
@@ -124,19 +195,17 @@ export default function CreateReservationModal({
             </View>
 
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
-              <Text style={[styles.label, { color: theme.colors.muted }]}>Tavolo</Text>
+              <Text style={[styles.label, { color: theme.colors.muted }]}>Zona</Text>
               {loadingTables ? (
-                <Text style={{ color: theme.colors.muted, fontWeight: '700' }}>Caricamento tavoli…</Text>
+                <Text style={{ color: theme.colors.muted, fontWeight: '700' }}>Caricamento zone…</Text>
               ) : (
                 <View style={{ gap: 8 }}>
-                  {tables.slice(0, 12).map((t) => {
-                    const active = selectedTableId === t.id;
-                    const label = t.numero ? `Tavolo ${t.numero}` : t.nome;
-                    const zone = t.zona ? ` • ${t.zona}` : '';
+                  {zones.map((z) => {
+                    const active = selectedZoneId === z.id;
                     return (
                       <TouchableOpacity
-                        key={t.id}
-                        onPress={() => setSelectedTableId(t.id)}
+                        key={z.id}
+                        onPress={() => setSelectedZoneId(z.id)}
                         style={[
                           styles.tablePick,
                           {
@@ -145,15 +214,13 @@ export default function CreateReservationModal({
                           },
                         ]}
                       >
-                        <Text style={{ color: theme.colors.text, fontWeight: '800' }}>{label}{zone}</Text>
+                        <Text style={{ color: theme.colors.text, fontWeight: '800' }}>{z.label}</Text>
+                        <Text style={{ color: theme.colors.muted, marginTop: 4, fontSize: 12 }}>
+                          Per testa: {z.per_testa !== null && z.per_testa !== undefined ? `€${z.per_testa}` : '—'} • Minimo: {z.costo_minimo !== null && z.costo_minimo !== undefined ? `€${z.costo_minimo}` : '—'} • Max: {z.persone_max ?? '—'}
+                        </Text>
                       </TouchableOpacity>
                     );
                   })}
-                  {tables.length > 12 ? (
-                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                      Mostrati i primi 12 tavoli. Usa la schermata Tavoli per gestirli.
-                    </Text>
-                  ) : null}
                 </View>
               )}
 
@@ -166,6 +233,18 @@ export default function CreateReservationModal({
                 placeholderTextColor={theme.colors.muted}
                 style={[styles.input, { borderColor: theme.colors.border, color: theme.colors.text }]}
               />
+
+              <Text style={[styles.label, { color: theme.colors.muted }]}>Nome tavolo (opzionale)</Text>
+              <TextInput
+                value={tableName}
+                onChangeText={(t) => setTableName(t.replace(/^\s+/, '').slice(0, 60))}
+                placeholder="Es: Compleanno Marta"
+                placeholderTextColor={theme.colors.muted}
+                style={[styles.input, { borderColor: theme.colors.border, color: theme.colors.text }]}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+              <Text style={[styles.helperText, { color: theme.colors.muted }]}>{tableName.length}/60</Text>
 
               <TouchableOpacity
                 onPress={submit}
@@ -211,6 +290,12 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: 10,
     padding: 10,
+  },
+  helperText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'right',
+    marginTop: 4,
   },
   submit: {
     marginTop: 14,

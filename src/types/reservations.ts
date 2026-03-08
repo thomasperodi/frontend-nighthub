@@ -8,7 +8,9 @@ export type Reservation = {
   id: string;
   user_id: string;
   event_id: string;
+  venue_zone_id?: string | null;
   venue_table_id?: string | null;
+  table_name?: string | null;
   type: 'table' | 'entry';
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
   guests: number;
@@ -31,7 +33,9 @@ export type CreateReservationDto = {
   event_id: string;
   type: Reservation['type'];
   guests: number;
+  venue_zone_id?: string | null;
   venue_table_id?: string | null;
+  table_name?: string | null;
   status?: Reservation['status'];
   total_amount?: number;
 };

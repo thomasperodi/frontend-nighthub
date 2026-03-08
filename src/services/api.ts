@@ -26,7 +26,7 @@ function resolveApiBaseUrl(rawUrl: string): string {
     value = fallback;
   }
 
-  return value.endsWith('/api') ? value : `${value}/api`;
+  return value;
 }
 
 const API_BASE_URL = resolveApiBaseUrl(RAW_API_URL);
@@ -36,7 +36,7 @@ console.log('API baseURL:', API_BASE_URL);
 
 // console.log(`API baseURL: ${baseURL}`);
 export const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: API_BASE_URL ,
   timeout: 10000,
 });
 

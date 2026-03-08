@@ -4,6 +4,7 @@ export type EventAccessMode = 'LIST' | 'PRE_SALE';
 export type EventStats = {
   event_id: string;
   total_entries: number;
+  total_entries_revenue: number;
   total_bar: number;
   total_cloakroom: number;
   total_tables: number;
@@ -112,6 +113,7 @@ export type EventFilters = {
 export type VenueStats = {
   venue_id: string;
   total_entries: number;
+  total_entries_revenue: number;
   total_bar: number;
   total_cloakroom: number;
   total_tables: number;

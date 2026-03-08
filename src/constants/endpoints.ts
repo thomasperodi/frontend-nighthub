@@ -77,6 +77,9 @@ export const API_ENDPOINTS = {
     CREATE_PAYMENT_SHEET_INTENT: '/payments/payment-sheet-intent',
     CONFIRM_PAYMENT_INTENT: (paymentIntentId: string) =>
       `/payments/payment-intent/${paymentIntentId}/confirm`,
+    VENUE_TRANSACTIONS: '/payments/venue/transactions',
+    VENUE_ORDER_REFUND: (orderId: string) => `/payments/venue/orders/${orderId}/refund`,
+    VENUE_ORDERS_REFUND_BULK: '/payments/venue/orders/refund-bulk',
   },
 
   // Users

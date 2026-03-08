@@ -12,7 +12,6 @@ export type VenueTable = {
 export type CreateVenueTableInput = {
   nome: string;
   zona?: string;
-  numero?: number;
   per_testa?: number;
   costo_minimo?: number;
   persone_max?: number;

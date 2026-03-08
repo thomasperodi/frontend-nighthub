@@ -18,7 +18,9 @@ type BackendReservationCreateInput = {
   guests: number;
   status?: 'pending' | 'confirmed' | 'cancelled' | 'completed';
   total_amount?: number;
+  venue_zone_id?: string | null;
   venue_table_id?: string | null;
+  table_name?: string | null;
 };
 
 function normalizeStatus(status: unknown): BackendReservationCreateInput['status'] | undefined {
@@ -53,10 +55,18 @@ function normalizeCreateReservationPayload(input: any): BackendReservationCreate
   const total_amount = input?.total_amount ?? input?.totalAmount;
   const totalAmountNum = total_amount === null || total_amount === undefined ? undefined : Number(total_amount);
 
+  const venue_zone_id: string | null | undefined =
+    input?.venue_zone_id ?? input?.venueZoneId ?? null;
+
   const venue_table_id: string | null | undefined =
     input?.venue_table_id ?? input?.venueTableId ?? input?.table_id ?? null;
 
   const status = normalizeStatus(input?.status);
+  const table_name_raw = input?.table_name ?? input?.tableName;
+  const table_name =
+    table_name_raw === null || table_name_raw === undefined
+      ? undefined
+      : String(table_name_raw).trim() || null;
 
   return {
     user_id,
@@ -65,7 +75,9 @@ function normalizeCreateReservationPayload(input: any): BackendReservationCreate
     guests,
     status,
     total_amount: Number.isFinite(totalAmountNum as number) ? (totalAmountNum as number) : undefined,
-    venue_table_id,
+    venue_zone_id,
+    venue_table_id: venue_table_id ?? venue_zone_id,
+    table_name,
   };
 }
 

@@ -29,7 +29,18 @@ export async function upsertVenueTablesBulk(
 }
 
 export async function deleteVenueTable(venueId: string, tableId: string): Promise<void> {
-  await api.delete(API_ENDPOINTS.VENUES.TABLE_DELETE(venueId, tableId));
+  try {
+    await api.delete(API_ENDPOINTS.VENUES.TABLE_DELETE(venueId, tableId));
+  } catch (error: any) {
+    const message = error?.response?.data?.message;
+    if (Array.isArray(message) && message.length) {
+      throw new Error(String(message[0]));
+    }
+    if (typeof message === 'string' && message.trim().length) {
+      throw new Error(message);
+    }
+    throw error;
+  }
 }
 
 export async function updateVenueTable(

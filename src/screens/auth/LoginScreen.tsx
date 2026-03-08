@@ -167,27 +167,23 @@ export default function LoginScreen({ navigation }: any) {
                     accessibilityLabel="Password"
                   />
                 </View>
+
+                <PrimaryButton
+                  title={isSubmitting ? "Accedendo..." : "Accedi"}
+                  onPress={handleLogin}
+                  disabled={isSubmitting}
+                  isLoading={isSubmitting}
+                />
+
+                <View style={styles.footer}>
+                  <Text style={[styles.footerText, { color: theme.colors.muted }]}>Non hai un account?</Text>
+                  <TouchableOpacity onPress={() => navigation.navigate("Register")}> 
+                    <Text style={[styles.signup, { color: theme.colors.primary }]}> Crea account cliente</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
           </ScrollView>
-
-          {!keyboardVisible && (
-            <View style={[styles.bottomActionArea, { paddingBottom: Math.max(insets.bottom, 12), borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}> 
-              <PrimaryButton
-                title={isSubmitting ? "Accedendo..." : "Accedi"}
-                onPress={handleLogin}
-                disabled={isSubmitting}
-                isLoading={isSubmitting}
-              />
-
-              <View style={styles.footer}>
-                <Text style={[styles.footerText, { color: theme.colors.muted }]}>Non hai un account?</Text>
-                <TouchableOpacity onPress={() => navigation.navigate("Register")}> 
-                  <Text style={[styles.signup, { color: theme.colors.primary }]}> Crea account cliente</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
         </KeyboardAvoidingView>
       </SafeAreaView>
     </GradientBackground>
@@ -228,16 +224,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginTop: 4,
     borderWidth: 1,
-  },
-  bottomActionArea: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 0,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 12,
-    gap: 8,
   },
   title: {
     fontSize: 32,

@@ -7,7 +7,7 @@ import { Event, EventStats, VenueStats } from "../../types/events";
 
 type Props = {
   venueId?: string | null;
-  liveEvent?: Event | null;
+  selectedEvent?: Event | null;
   eventStats?: EventStats | null;
 };
 
@@ -27,7 +27,7 @@ function formatDate(value?: string) {
   return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
 }
 
-export default function ReportsScreen({ venueId, liveEvent, eventStats }: Props) {
+export default function ReportsScreen({ venueId, selectedEvent, eventStats }: Props) {
   const { theme } = useTheme();
 
   const [loading, setLoading] = useState(false);
@@ -38,22 +38,24 @@ export default function ReportsScreen({ venueId, liveEvent, eventStats }: Props)
 
   const totals = useMemo(() => {
     const totalEntries = venueStats?.total_entries ?? 0;
+    const totalEntriesRevenue = toNumber(venueStats?.total_entries_revenue);
     const totalBar = toNumber(venueStats?.total_bar);
     const totalCloak = toNumber(venueStats?.total_cloakroom);
     const totalTables = toNumber(venueStats?.total_tables);
-    const totalRevenue = totalBar + totalCloak + totalTables;
+    const totalRevenue = totalEntriesRevenue + totalBar + totalCloak + totalTables;
     const avgPerEntry = totalEntries > 0 ? totalRevenue / totalEntries : 0;
-    return { totalEntries, totalBar, totalCloak, totalTables, totalRevenue, avgPerEntry };
+    return { totalEntries, totalEntriesRevenue, totalBar, totalCloak, totalTables, totalRevenue, avgPerEntry };
   }, [venueStats]);
 
   const live = useMemo(() => {
+    const entriesRevenue = toNumber(eventStats?.total_entries_revenue);
     const bar = toNumber(eventStats?.total_bar);
     const clo = toNumber(eventStats?.total_cloakroom);
     const tab = toNumber(eventStats?.total_tables);
     const entries = eventStats?.total_entries ?? 0;
-    const revenue = bar + clo + tab;
+    const revenue = entriesRevenue + bar + clo + tab;
     const avg = entries > 0 ? revenue / entries : 0;
-    return { bar, clo, tab, entries, revenue, avg };
+    return { entriesRevenue, bar, clo, tab, entries, revenue, avg };
   }, [eventStats]);
 
   const byEvent = useMemo(() => {
@@ -128,18 +130,19 @@ export default function ReportsScreen({ venueId, liveEvent, eventStats }: Props)
         </View>
       ) : (
         <>
-          {/* Live event snapshot */}
-          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Evento live</Text>
+          {/* Selected event snapshot */}
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Serata selezionata</Text>
           <View style={styles.card}>
-            <Text style={styles.label}>{liveEvent?.name ?? 'Nessun evento live'}</Text>
-            {liveEvent ? (
+            <Text style={styles.label}>{selectedEvent?.name ?? 'Nessuna serata selezionata'}</Text>
+            {selectedEvent ? (
               <>
                 <Text style={styles.value}>€{live.revenue.toFixed(2)}</Text>
                 <Text style={styles.meta}>Ingressi: {live.entries} • Media/ingresso: €{live.avg.toFixed(2)}</Text>
-                <Text style={styles.meta}>Bar €{live.bar.toFixed(2)} • Tavoli €{live.tab.toFixed(2)} • Guardaroba €{live.clo.toFixed(2)}</Text>
+                <Text style={styles.meta}>Ingresso €{live.entriesRevenue.toFixed(2)} • Bar €{live.bar.toFixed(2)}</Text>
+                <Text style={styles.meta}>Guardaroba €{live.clo.toFixed(2)} • Tavoli €{live.tab.toFixed(2)}</Text>
               </>
             ) : (
-              <Text style={styles.meta}>Avvia un evento per vedere le metriche live.</Text>
+              <Text style={styles.meta}>Seleziona un evento dalla Home per vedere i valori corretti della serata.</Text>
             )}
           </View>
 
@@ -159,6 +162,10 @@ export default function ReportsScreen({ venueId, liveEvent, eventStats }: Props)
               <Text style={styles.kpiValue}>€{totals.avgPerEntry.toFixed(2)}</Text>
             </View>
             <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>Incasso Ingresso</Text>
+              <Text style={styles.kpiValue}>€{totals.totalEntriesRevenue.toFixed(2)}</Text>
+            </View>
+            <View style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>Incasso Tavoli</Text>
               <Text style={styles.kpiValue}>€{totals.totalTables.toFixed(2)}</Text>
             </View>
@@ -172,7 +179,11 @@ export default function ReportsScreen({ venueId, liveEvent, eventStats }: Props)
             ) : (
               byEvent.map((e) => {
                 const es = venueStats?.events?.find((s) => s.event_id === e.id);
-                const revenue = toNumber(es?.total_bar) + toNumber(es?.total_tables) + toNumber(es?.total_cloakroom);
+                const revenue =
+                  toNumber(es?.total_entries_revenue) +
+                  toNumber(es?.total_bar) +
+                  toNumber(es?.total_tables) +
+                  toNumber(es?.total_cloakroom);
                 const entries = es?.total_entries ?? 0;
                 return (
                   <View key={e.id} style={styles.row}>

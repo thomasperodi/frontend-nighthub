@@ -29,7 +29,6 @@ export default function App() {
       <AuthProvider>
         <StripeProvider
           publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ''}
-          merchantIdentifier="merchant.com.perodithomas.nighthub"
           urlScheme="nighthub"
         >
           <NavigationContainer ref={navigationRef} onReady={flushNavigationQueue}>

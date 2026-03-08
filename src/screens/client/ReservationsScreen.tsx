@@ -58,7 +58,7 @@ export default function ReservationsScreen({ navigation }: any) {
             <View style={{ flex: 1 }}>
               <View style={styles.rowTopMeta}>
                 <View style={[styles.typePill, { borderColor: theme.colors.border, backgroundColor: theme.colors.background }]}> 
-                  <Text style={[styles.typePillText, { color: theme.colors.text }]}>{item.type === 'table' ? 'Tavolo' : 'Ingresso'}</Text>
+                  <Text style={[styles.typePillText, { color: theme.colors.text }]}>{item.type === 'table' ? 'Zona tavolo' : 'Ingresso'}</Text>
                 </View>
                 {!canCancelFromClient(item) ? (
                   <View style={[styles.lockPill, { borderColor: theme.colors.border }]}> 
@@ -71,8 +71,8 @@ export default function ReservationsScreen({ navigation }: any) {
               <Text style={[styles.eventDate, { color: theme.colors.muted }]}>{formatDate(item.event?.date)}</Text>
               {item.type === 'table' ? (
                 <Text style={[styles.metaText, { color: theme.colors.muted }]}>
-                  {(item.venue_table?.zona ? `${item.venue_table.zona} • ` : '')}
-                  {item.venue_table?.numero ? `Tavolo ${item.venue_table.numero}` : (item.venue_table?.nome ?? 'Tavolo')}
+                  {(item.venue_table?.zona ? `Zona ${item.venue_table.zona}` : (item.venue_table?.nome ? `Zona ${item.venue_table.nome}` : 'Zona richiesta'))}
+                  {item.venue_table?.numero ? ` • Tavolo ${item.venue_table.numero}` : ''}
                   {item.guests ? ` • ${item.guests} ospiti` : ''}
                 </Text>
               ) : (

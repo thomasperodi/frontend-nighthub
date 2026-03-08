@@ -26,7 +26,7 @@ export default function HelpSupportScreen({ navigation }: any) {
   const { theme } = useTheme();
 
   const openEmail = async () => {
-    const url = "mailto:support@nightapp.com?subject=Supporto%20NightApp";
+    const url = "mailto:perodithomas88@gmail.com?subject=Supporto%20NightApp";
     const canOpen = await Linking.canOpenURL(url);
     if (canOpen) await Linking.openURL(url);
   };

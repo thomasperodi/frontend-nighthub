@@ -2,7 +2,6 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { login as apiLogin, persistLogin, clearLogin, restoreLogin, logoutApi } from '../services/auth';
-import { resetTo } from '../navigation/NavigationService';
 import { registerForPushNotifications, sendPushToken } from '../services/push';
 import { startVenueStayMonitoring } from '../services/locationTracking';
 
@@ -152,9 +151,6 @@ export const AuthProvider = ({ children }: any) => {
     await clearLogin();
     setToken(null);
     setUser(null);
-
-    // Always land on Login after logout
-    resetTo('Login');
   };
 
   return (

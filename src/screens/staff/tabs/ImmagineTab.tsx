@@ -2,7 +2,13 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Activi
 import { Feather } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import { useTheme } from "../../../theme/ThemeProvider";
-import { listHostessTables, updateHostessTableEntrati, assignHostessTableNumber, type HostessTable } from "../../../services/hostess";
+import {
+  listHostessTables,
+  updateHostessTableEntrati,
+  assignHostessTableNumber,
+  setHostessTableConfirmed,
+  type HostessTable,
+} from "../../../services/hostess";
 
 export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }: any) {
   const { theme } = useTheme();
@@ -10,12 +16,18 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showConfirmed, setShowConfirmed] = useState(false);
 
   const tavoliPrenotati = tavoli.filter(t => Number(t.prenotati ?? 0) > 0);
+  const tavoliVisibili = tavoliPrenotati.filter(t => showConfirmed || !t.confermato);
 
-  const tavoliFiltrati = tavoliPrenotati.filter(t =>
-    (t.nome ?? '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const tavoliFiltrati = tavoliVisibili.filter(t => {
+    const q = searchQuery.toLowerCase();
+    const tableName = (t.table_name ?? '').toLowerCase();
+    const zona = (t.zona ?? '').toLowerCase();
+    const nome = (t.nome ?? '').toLowerCase();
+    return nome.includes(q) || tableName.includes(q) || zona.includes(q);
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -34,6 +46,7 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
           eventId: String(eventId),
           venueId: String(venueId),
           onlyBooked: true,
+          includeConfirmed: true,
         });
         if (mounted) setTavoli(data);
       } catch (e: any) {
@@ -96,20 +109,45 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
       onSubmit: (numero: string) => {
         if (numero) {
           const parsed = parseInt(numero, 10);
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            showToast('Inserisci un numero tavolo valido');
+            return;
+          }
+          const previous = tavoli.find(t => t.id === id)?.numero;
           // optimistic
           setTavoli(prev => prev.map(t => t.id === id ? { ...t, numero: parsed } : t));
           assignHostessTableNumber(String(id), parsed)
-            .then(() => showToast('Tavolo assegnato'))
-            .catch(() => showToast('Errore assegnazione tavolo'));
+            .then((updated) => {
+              setTavoli(prev => prev.map(t => t.id === id ? { ...t, numero: updated.numero ?? parsed } : t));
+              showToast('Tavolo assegnato');
+            })
+            .catch((e: any) => {
+              setTavoli(prev => prev.map(t => t.id === id ? { ...t, numero: previous ?? null } : t));
+              showToast(e?.message || 'Errore assegnazione tavolo');
+            });
         }
       }
     });
   };
 
   const getTavoliStats = () => {
-    const completi = tavoli.filter(t => t.entrati >= t.prenotati).length;
-    const totalePersone = tavoli.reduce((sum, t) => sum + Number(t.entrati ?? 0), 0);
+    const completi = tavoliVisibili.filter(t => t.entrati >= t.prenotati).length;
+    const totalePersone = tavoliVisibili.reduce((sum, t) => sum + Number(t.entrati ?? 0), 0);
     return { completi, totalePersone };
+  };
+
+  const confermaTavolo = async (id: string | number) => {
+    const target = tavoli.find(t => t.id === id);
+    if (!target) return;
+
+    setTavoli(prev => prev.map(t => t.id === id ? { ...t, confermato: true } : t));
+    try {
+      await setHostessTableConfirmed(String(id), true);
+      showToast("Tavolo confermato");
+    } catch (e: any) {
+      setTavoli(prev => prev.map(t => t.id === id ? { ...t, confermato: false } : t));
+      showToast(e?.message || "Errore conferma tavolo");
+    }
   };
 
   const stats = getTavoliStats();
@@ -133,7 +171,7 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
           <Text style={styles.subtitle}>Gestione prenotazioni</Text>
         </View>
         <View style={styles.totalBadge}>
-          <Text style={styles.totalBadgeText}>{tavoliPrenotati.length}</Text>
+          <Text style={styles.totalBadgeText}>{tavoliVisibili.length}</Text>
           <Text style={styles.totalBadgeLabel}>tavoli</Text>
         </View>
       </View>
@@ -169,6 +207,16 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
         )}
       </View>
 
+      <TouchableOpacity
+        style={[styles.filterButton, showConfirmed && styles.filterButtonActive]}
+        onPress={() => setShowConfirmed(prev => !prev)}
+      >
+        <Feather name={showConfirmed ? "eye" : "eye-off"} size={16} color="white" />
+        <Text style={styles.filterButtonText}>
+          {showConfirmed ? "Nascondi confermati" : "Mostra confermati"}
+        </Text>
+      </TouchableOpacity>
+
       {loading && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <ActivityIndicator color="#6D5BFF" />
@@ -178,13 +226,13 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
       {error && (
         <Text style={{ color: '#EF4444' }}>{error}</Text>
       )}
-      {tavoliPrenotati.length === 0 && !loading && !error && (
+      {tavoliVisibili.length === 0 && !loading && !error && (
         <View style={styles.emptyContainer}>
           <Feather name="inbox" size={64} color="rgba(255,255,255,0.3)" />
-          <Text style={styles.emptyText}>Nessun tavolo prenotato</Text>
+          <Text style={styles.emptyText}>Nessun tavolo da mostrare</Text>
         </View>
       )}
-      {tavoliFiltrati.length === 0 && !loading && !error && tavoliPrenotati.length > 0 && (
+      {tavoliFiltrati.length === 0 && !loading && !error && tavoliVisibili.length > 0 && (
         <View style={styles.emptyContainer}>
           <Feather name="search" size={64} color="rgba(255,255,255,0.3)" />
           <Text style={styles.emptyText}>Nessun tavolo trovato</Text>
@@ -193,15 +241,26 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
       {tavoliFiltrati.map(t => {
         const isComplete = t.entrati >= t.prenotati;
         const perHead = t.per_testa ?? 0;
+        const minSpend = Number(t.costo_minimo ?? 0);
         const current = perHead * t.entrati;
         const target = perHead * t.prenotati;
+        const tableLabel = String(t.table_name ?? '').trim();
+        const zonaLabel = String(t.zona ?? '').trim();
+        const primaryTitle = tableLabel || String(t.nome ?? '').trim() || 'Tavolo';
+        const isConfirmed = Boolean(t.confermato);
         
         return (
           <View key={t.id} style={[styles.tableCard, isComplete && styles.tableCardComplete]}>
             <View style={styles.tableHeader}>
               <View style={{ flex: 1, marginRight: 70 }}>
                 <View style={styles.tableNameRow}>
-                  <Text style={styles.tableTitle}>{t.nome}</Text>
+                  <Text style={styles.tableTitle}>{primaryTitle}</Text>
+                  {isConfirmed && (
+                    <View style={styles.confirmedBadge}>
+                      <Feather name="shield" size={14} color="#60A5FA" />
+                      <Text style={styles.confirmedText}>Confermato</Text>
+                    </View>
+                  )}
                   {isComplete && (
                     <View style={styles.completeBadge}>
                       <Feather name="check" size={14} color="#22c55e" />
@@ -209,13 +268,13 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
                     </View>
                   )}
                 </View>
+                {zonaLabel ? (
+                  <View style={styles.primaryZoneRow}>
+                    <Feather name="map-pin" size={14} color="#93C5FD" />
+                    <Text style={styles.zonePrimaryText}>Zona: {zonaLabel}</Text>
+                  </View>
+                ) : null}
                 <View style={styles.tableInfoRow}>
-                  {t.zona && (
-                    <View style={styles.zoneBadge}>
-                      <Feather name="map" size={14} color="#93C5FD" />
-                      <Text style={styles.zoneText}>{t.zona}</Text>
-                    </View>
-                  )}
                   <Text style={styles.tableInfo}>
                     {t.entrati}/{t.prenotati} persone
                   </Text>
@@ -223,6 +282,9 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
                     €{current}/{target} • €{perHead} a testa
                   </Text>
                 </View>
+                {minSpend > 0 ? (
+                  <Text style={styles.minSpendText}>Minimo spesa: €{minSpend}</Text>
+                ) : null}
               </View>
               
               {/* {t.numero && (
@@ -272,6 +334,16 @@ export default function ImmagineTab({ openPrompt, showToast, eventId, venueId }:
                   {t.numero ? `Tavolo #${t.numero}` : "Assegna tavolo"}
                 </Text>
               </TouchableOpacity>
+
+              {!isConfirmed && (
+                <TouchableOpacity
+                  style={[styles.tableButton, styles.confirmTableButton, { flex: 1 }]}
+                  onPress={() => confermaTavolo(t.id)}
+                >
+                  <Feather name="shield" size={18} color="white" />
+                  <Text style={styles.tableButtonText}>Conferma tavolo</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         );
@@ -382,8 +454,9 @@ const styles = StyleSheet.create({
   tableNameRow: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 10,
-    marginBottom: 8,
+    marginBottom: 6,
   },
 
   tableTitle: {
@@ -404,6 +477,22 @@ const styles = StyleSheet.create({
 
   completeText: {
     color: "#22c55e",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  confirmedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(96, 165, 250, 0.2)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+
+  confirmedText: {
+    color: "#60A5FA",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -453,6 +542,24 @@ const styles = StyleSheet.create({
     color: "#93C5FD",
     fontSize: 12,
     fontWeight: "700",
+  },
+  primaryZoneRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 8,
+  },
+  zonePrimaryText: {
+    color: "#93C5FD",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  minSpendText: {
+    color: "#FBBF24",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 6,
   },
 
   tableNumberBadge: {
@@ -532,6 +639,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#6D5BFF",
   },
 
+  confirmTableButton: {
+    backgroundColor: "#3B82F6",
+  },
+
   emptyContainer: {
     alignItems: "center",
     justifyContent: "center",
@@ -560,5 +671,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
     paddingVertical: 12,
+  },
+
+  filterButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    paddingVertical: 10,
+    marginBottom: 20,
+  },
+
+  filterButtonActive: {
+    backgroundColor: "rgba(59, 130, 246, 0.3)",
+    borderWidth: 1,
+    borderColor: "rgba(96, 165, 250, 0.5)",
+  },
+
+  filterButtonText: {
+    color: "white",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -114,9 +114,14 @@ function KpiCard({ label, value, icon, color }: { label: string; value: string; 
 
 export default function VenueReservationsTab(props: Props) {
   const { theme } = useTheme();
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
   const [query, setQuery] = useState('');
   const [actionReservationId, setActionReservationId] = useState<string | null>(null);
+  const [showConfirmedSection, setShowConfirmedSection] = useState(false);
+
+  useEffect(() => {
+    setShowConfirmedSection(statusFilter === 'confirmed');
+  }, [statusFilter, props.selectedEventId]);
 
   const selected = useMemo(() => {
     if (!props.selectedEventId) return null;
@@ -192,19 +197,66 @@ export default function VenueReservationsTab(props: Props) {
     });
   }, [tableReservations, statusFilter, query]);
 
+  const pendingVisible = useMemo(
+    () => filteredAndSorted.filter((r) => r.status === 'pending'),
+    [filteredAndSorted],
+  );
+
+  const confirmedVisible = useMemo(
+    () => filteredAndSorted.filter((r) => r.status === 'confirmed'),
+    [filteredAndSorted],
+  );
+
+  const pendingGuestsVisible = useMemo(
+    () => pendingVisible.reduce((sum, r) => sum + (r.guests || 0), 0),
+    [pendingVisible],
+  );
+
+  const pendingRevenueVisible = useMemo(
+    () => pendingVisible.reduce((sum, r) => sum + (expectedAmountForReservation(r) ?? 0), 0),
+    [pendingVisible],
+  );
+
+  const canRenderConfirmedSection = statusFilter === 'all' || statusFilter === 'confirmed';
+  const shouldShowConfirmedList = statusFilter === 'confirmed' || showConfirmedSection;
+
   const confirmReservation = async (id: string) => {
-    Alert.alert('Confermare prenotazione?', 'La prenotazione passerà in stato “Confermata”.', [
+    try {
+      setActionReservationId(id);
+      await updateReservation(id, { status: 'confirmed' });
+      await props.onRefresh();
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || 'Impossibile confermare la prenotazione';
+      Alert.alert('Errore', String(msg));
+    } finally {
+      setActionReservationId(null);
+    }
+  };
+
+  const confirmAllPending = async () => {
+    const ids = pendingVisible.map((r) => r.id);
+    if (ids.length === 0) return;
+
+    Alert.alert('Conferma rapida', `Confermare ${ids.length} richieste in attesa?`, [
       { text: 'Annulla', style: 'cancel' },
       {
-        text: 'Conferma',
-        style: 'default',
+        text: 'Conferma tutte',
         onPress: async () => {
           try {
-            setActionReservationId(id);
-            await updateReservation(id, { status: 'confirmed' });
+            setActionReservationId('bulk-confirm');
+            const settled = await Promise.allSettled(
+              ids.map((id) => updateReservation(id, { status: 'confirmed' })),
+            );
+
+            const ok = settled.filter((s) => s.status === 'fulfilled').length;
+            const ko = settled.length - ok;
             await props.onRefresh();
+
+            if (ko > 0) {
+              Alert.alert('Conferma parziale', `Confermate ${ok} richieste, ${ko} non riuscite.`);
+            }
           } catch (e: any) {
-            const msg = e?.response?.data?.message || e?.message || 'Impossibile confermare la prenotazione';
+            const msg = e?.response?.data?.message || e?.message || 'Errore nella conferma multipla';
             Alert.alert('Errore', String(msg));
           } finally {
             setActionReservationId(null);
@@ -247,7 +299,7 @@ export default function VenueReservationsTab(props: Props) {
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}> 
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.title, { color: theme.colors.text }]}>Prenotazioni tavoli</Text>
+          <Text style={[styles.title, { color: theme.colors.text }]}>Richieste tavoli per zona</Text>
           <Text style={[styles.subtitle, { color: theme.colors.muted }]} numberOfLines={1}>
             {selected ? `${formatEventDate(selected.date)} • ${selected.name}` : 'Seleziona un evento'}
           </Text>
@@ -344,7 +396,7 @@ export default function VenueReservationsTab(props: Props) {
             </View>
 
             <Text style={[styles.hint, { color: theme.colors.muted }]}>
-              L'incasso previsto è calcolato da per-testa e/o minimo del tavolo.
+              Le richieste arrivano per zona. Il locale conferma il tavolo assegnato direttamente in cassa/sala.
             </Text>
 
             <View style={[styles.filtersRow, { marginTop: 10 }]}>
@@ -371,7 +423,7 @@ export default function VenueReservationsTab(props: Props) {
             <View style={[styles.searchRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}> 
               <Feather name="search" size={16} color={theme.colors.muted} />
               <TextInput
-                placeholder="Cerca (nome, telefono, tavolo, zona…)"
+                placeholder="Cerca cliente o zona…"
                 placeholderTextColor={theme.colors.muted}
                 value={query}
                 onChangeText={setQuery}
@@ -386,6 +438,33 @@ export default function VenueReservationsTab(props: Props) {
               )}
             </View>
 
+            {pendingVisible.length > 0 ? (
+              <View style={[styles.pendingPanel, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}> 
+                <View style={styles.pendingPanelTop}>
+                  <Text style={[styles.pendingPanelTitle, { color: theme.colors.text }]}>Coda da confermare</Text>
+                  <Text style={[styles.pendingPanelMeta, { color: theme.colors.muted }]}> 
+                    {pendingVisible.length} richieste • {pendingGuestsVisible} ospiti • {formatMoney(pendingRevenueVisible)}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  onPress={confirmAllPending}
+                  disabled={actionReservationId === 'bulk-confirm'}
+                  style={[
+                    styles.pendingPanelBtn,
+                    { backgroundColor: theme.colors.primary, opacity: actionReservationId === 'bulk-confirm' ? 0.6 : 1 },
+                  ]}
+                >
+                  {actionReservationId === 'bulk-confirm' ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <Feather name="check-circle" size={16} color="white" />
+                  )}
+                  <Text style={styles.pendingPanelBtnText}>Conferma tutte le richieste visibili</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
             {tableReservations.length === 0 ? (
               <View style={[styles.center, { paddingVertical: 18 }]}> 
                 <Feather name="bookmark" size={22} color={theme.colors.muted} />
@@ -395,10 +474,14 @@ export default function VenueReservationsTab(props: Props) {
               <Text style={[styles.noResultsText, { color: theme.colors.muted }]}>Nessuna prenotazione per i filtri selezionati.</Text>
             ) : (
               <View style={{ marginTop: 6 }}>
-                {filteredAndSorted.map((r) => {
-                  const label =
-                    r.venue_table?.numero ? `Tavolo ${r.venue_table.numero}` : r.venue_table?.nome ? String(r.venue_table.nome) : 'Tavolo';
-                  const zone = r.venue_table?.zona ? ` • ${r.venue_table.zona}` : '';
+                {pendingVisible.length > 0 ? (
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>In attesa ({pendingVisible.length})</Text>
+                ) : null}
+
+                {pendingVisible.map((r) => {
+                  const zoneName = r.venue_table?.zona ?? r.venue_table?.nome ?? 'Senza zona';
+                  const label = `Zona ${zoneName}`;
+                  const assigned = r.venue_table?.numero ? ` • Tavolo ${r.venue_table.numero}` : '';
                   const time = r.created_at ? ` • ${new Date(r.created_at).toLocaleTimeString().slice(0, 5)}` : '';
                   const who =
                     (r.user?.name && r.user.name.trim().length ? r.user.name : null) ??
@@ -408,6 +491,89 @@ export default function VenueReservationsTab(props: Props) {
 
                   const amount = expectedAmountForReservation(r);
                   const isBusy = actionReservationId === r.id;
+                  const customTableName = String(r.table_name ?? '').trim();
+
+                  return (
+                    <View key={r.id} style={[styles.resRow, styles.resRowPending, { borderColor: theme.colors.border }]}> 
+                      <View style={styles.resHeaderRow}>
+                        <View style={styles.resTitleWrap}>
+                          <View style={[styles.resIconWrap, styles.resIconWrapPending]}>
+                            <Feather name="clock" size={16} color="#f59e0b" />
+                          </View>
+                          <Text style={[styles.resRowText, { color: theme.colors.text }]} numberOfLines={1}>
+                            {label}{assigned}
+                          </Text>
+                        </View>
+                        <Text style={badgeStyle(r.status)}>{formatReservationStatus(r.status)}</Text>
+                      </View>
+
+                      <View style={styles.resBodyBlock}>
+                        <Text style={[styles.resRowText, { color: theme.colors.text }]} numberOfLines={1}>
+                          {r.guests} ospiti{time}
+                        </Text>
+                        <Text style={[styles.resRowSubText, { color: theme.colors.muted }]} numberOfLines={1}>
+                          {who} • {amount === null ? '—' : formatMoney(amount)}
+                        </Text>
+                        {customTableName ? (
+                          <Text style={[styles.resRowNameTag, { color: theme.colors.primary }]} numberOfLines={1}>
+                            Nome tavolo: {customTableName}
+                          </Text>
+                        ) : null}
+                      </View>
+
+                      <View style={styles.pendingActionsRow}>
+                        {isBusy ? (
+                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                        ) : (
+                          <>
+                            <TouchableOpacity onPress={() => confirmReservation(r.id)} style={styles.pendingPrimaryActionBtn}>
+                              <Feather name="check" size={15} color="white" />
+                              <Text style={styles.actionConfirmText}>Conferma richiesta</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => cancelReservationById(r.id)} style={styles.pendingSecondaryActionBtn}>
+                              <Feather name="x" size={15} color="white" />
+                              <Text style={styles.actionRejectText}>Rifiuta</Text>
+                            </TouchableOpacity>
+                          </>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+
+                {confirmedVisible.length > 0 && canRenderConfirmedSection ? (
+                  <View style={[styles.sectionHeaderRow, { marginTop: pendingVisible.length ? 14 : 0 }]}>
+                    <Text style={[styles.sectionTitle, { color: theme.colors.text, marginTop: 0 }]}>Confermate ({confirmedVisible.length})</Text>
+                    {statusFilter === 'all' ? (
+                      <TouchableOpacity
+                        onPress={() => setShowConfirmedSection((prev) => !prev)}
+                        style={[styles.toggleConfirmedBtn, { borderColor: theme.colors.border }]}
+                      >
+                        <Text style={[styles.toggleConfirmedBtnText, { color: theme.colors.text }]}>
+                          {shouldShowConfirmedList ? 'Nascondi' : 'Mostra'}
+                        </Text>
+                        <Feather name={shouldShowConfirmedList ? 'chevron-up' : 'chevron-down'} size={14} color={theme.colors.text} />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {confirmedVisible.map((r) => {
+                  if (!shouldShowConfirmedList) return null;
+
+                  const zoneName = r.venue_table?.zona ?? r.venue_table?.nome ?? 'Senza zona';
+                  const label = `Zona ${zoneName}`;
+                  const assigned = r.venue_table?.numero ? ` • Tavolo ${r.venue_table.numero}` : '';
+                  const time = r.created_at ? ` • ${new Date(r.created_at).toLocaleTimeString().slice(0, 5)}` : '';
+                  const who =
+                    (r.user?.name && r.user.name.trim().length ? r.user.name : null) ??
+                    (r.user?.email && r.user.email.trim().length ? r.user.email : null) ??
+                    (r.user?.phone && r.user.phone.trim().length ? r.user.phone : null) ??
+                    (r.user_id ? `Utente ${r.user_id.slice(0, 6)}` : 'Utente');
+
+                  const amount = expectedAmountForReservation(r);
+                  const isBusy = actionReservationId === r.id;
+                  const customTableName = String(r.table_name ?? '').trim();
 
                   return (
                     <View key={r.id} style={[styles.resRow, { borderColor: theme.colors.border }]}> 
@@ -417,11 +583,16 @@ export default function VenueReservationsTab(props: Props) {
 
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.resRowText, { color: theme.colors.text }]} numberOfLines={1}>
-                          {label}{zone} • {r.guests} ospiti{time}
+                          {label}{assigned} • {r.guests} ospiti{time}
                         </Text>
                         <Text style={[styles.resRowSubText, { color: theme.colors.muted }]} numberOfLines={1}>
                           {who} • {amount === null ? '—' : formatMoney(amount)}
                         </Text>
+                        {customTableName ? (
+                          <Text style={[styles.resRowNameTag, { color: theme.colors.primary }]} numberOfLines={1}>
+                            Nome tavolo: {customTableName}
+                          </Text>
+                        ) : null}
                       </View>
 
                       <View style={styles.rightCol}>
@@ -430,20 +601,12 @@ export default function VenueReservationsTab(props: Props) {
                         <View style={styles.actionsRow}>
                           {isBusy ? (
                             <ActivityIndicator size="small" color={theme.colors.primary} />
-                          ) : r.status === 'pending' ? (
-                            <>
-                              <TouchableOpacity onPress={() => confirmReservation(r.id)} style={styles.actionIconBtn}>
-                                <Feather name="check" size={18} color="#22c55e" />
-                              </TouchableOpacity>
-                              <TouchableOpacity onPress={() => cancelReservationById(r.id)} style={styles.actionIconBtn}>
-                                <Feather name="x" size={18} color="#ef4444" />
-                              </TouchableOpacity>
-                            </>
-                          ) : r.status === 'confirmed' ? (
-                            <TouchableOpacity onPress={() => cancelReservationById(r.id)} style={styles.actionIconBtn}>
-                              <Feather name="x" size={18} color="#ef4444" />
+                          ) : (
+                            <TouchableOpacity onPress={() => cancelReservationById(r.id)} style={styles.actionRejectBtnCompact}>
+                              <Feather name="x" size={15} color="white" />
+                              <Text style={styles.actionRejectText}>Annulla</Text>
                             </TouchableOpacity>
-                          ) : null}
+                          )}
                         </View>
                       </View>
                     </View>
@@ -580,7 +743,37 @@ const styles = StyleSheet.create({
   hint: {
     fontSize: 12,
   },
-
+  pendingPanel: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+  },
+  pendingPanelTop: {
+    marginBottom: 8,
+  },
+  pendingPanelTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  pendingPanelMeta: {
+    fontSize: 12,
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  pendingPanelBtn: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  pendingPanelBtnText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   filtersRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -619,15 +812,17 @@ const styles = StyleSheet.create({
   },
 
   resRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    gap: 8,
     paddingVertical: 10,
     paddingHorizontal: 10,
     borderWidth: 1,
     borderRadius: 14,
     marginTop: 10,
     backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  resRowPending: {
+    borderColor: 'rgba(245,158,11,0.35)',
+    backgroundColor: 'rgba(245,158,11,0.08)',
   },
   resIconWrap: {
     width: 30,
@@ -637,6 +832,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  resIconWrapPending: {
+    backgroundColor: 'rgba(245,158,11,0.15)',
+  },
+  resHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  resTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  resBodyBlock: {
+    marginLeft: 38,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 6,
+    marginBottom: 2,
+    opacity: 0.95,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  toggleConfirmedBtn: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  toggleConfirmedBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   resRowText: {
     fontSize: 13,
     fontWeight: '700',
@@ -644,6 +883,11 @@ const styles = StyleSheet.create({
   resRowSubText: {
     fontSize: 12,
     marginTop: 2,
+  },
+  resRowNameTag: {
+    fontSize: 11,
+    marginTop: 3,
+    fontWeight: '700',
   },
   rightCol: {
     alignItems: 'flex-end',
@@ -653,11 +897,78 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     minHeight: 18,
+  },
+  pendingActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 2,
+  },
+  quickActionsWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   actionIconBtn: {
     padding: 2,
+  },
+  actionConfirmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#22c55e',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  actionConfirmText: {
+    color: 'white',
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  actionRejectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ef4444',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  actionRejectText: {
+    color: 'white',
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  pendingPrimaryActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#22c55e',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  pendingSecondaryActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  actionRejectBtnCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ef4444',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
 
   statusBadge: {

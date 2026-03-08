@@ -14,9 +14,13 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
 
   const tavoliPrenotati = tavoli.filter(t => Number(t.prenotati ?? 0) > 0);
 
-  const tavoliFiltrati = tavoliPrenotati.filter(t =>
-    (t.nome ?? '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const tavoliFiltrati = tavoliPrenotati.filter(t => {
+    const q = searchQuery.toLowerCase();
+    const tableName = (t.table_name ?? '').toLowerCase();
+    const zona = (t.zona ?? '').toLowerCase();
+    const nome = (t.nome ?? '').toLowerCase();
+    return nome.includes(q) || tableName.includes(q) || zona.includes(q);
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -105,10 +109,20 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
   const saldaTavolo = (id: string) => {
     const tavolo = tavoli.find(t => t.id === id);
     const importoAttuale = Number(tavolo?.pagato_totale || 0);
+    const perTesta = Number(tavolo?.per_testa || 0);
+    const entrati = Number(tavolo?.entrati || 0);
+    const minimoSpesa = Number(tavolo?.costo_minimo ?? 0);
+    const budgetAtteso = perTesta * entrati;
+    const totaleDaPagare = Math.max(budgetAtteso, minimoSpesa > 0 ? minimoSpesa : 0);
+    const importoMancante = Math.max(0, totaleDaPagare - importoAttuale);
+    const importoFinale = importoAttuale + importoMancante;
+    const messaggioConferma = importoMancante > 0
+      ? `Verranno aggiunti automaticamente €${importoMancante.toFixed(2)} per chiudere il tavolo. Totale saldo: €${importoFinale.toFixed(2)}.`
+      : `Saldare il tavolo con €${importoFinale.toFixed(2)}?`;
     
     Alert.alert(
       "Conferma saldo",
-      `Saldare il tavolo con €${importoAttuale.toFixed(2)}?`,
+      messaggioConferma,
       [
         { text: "Annulla", style: "cancel" },
         { 
@@ -116,15 +130,26 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
           onPress: async () => {
             try {
               // Salva l'importo al momento del saldo
-              setImportiSaldati(prev => ({ ...prev, [id]: importoAttuale }));
+              setImportiSaldati(prev => ({ ...prev, [id]: importoFinale }));
               
               // Optimistic update
               setTavoli(prev => prev.map(t => 
-                t.id === id ? { ...t, is_saldato: true, stato_pagamento: 'saldato' } : t
+                t.id === id
+                  ? {
+                      ...t,
+                      pagato_totale: importoFinale,
+                      is_saldato: true,
+                      stato_pagamento: 'saldato'
+                    }
+                  : t
               ));
+
+              if (importoMancante > 0) {
+                await addTablePayment(id, importoMancante, userId, eventId);
+              }
               
               await settleTable(id);
-              showToast("Tavolo saldato");
+              showToast(importoMancante > 0 ? `Tavolo saldato (+€${importoMancante.toFixed(2)})` : "Tavolo saldato");
               
               // Refresh data
               if (eventId && userId) {
@@ -240,11 +265,16 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
       ) : (
         tavoliFiltrati.map(t => {
           const perTesta = Number(t.per_testa || 0);
+          const minSpend = Number(t.costo_minimo ?? 0);
           const budgetAtteso = perTesta * t.entrati;
           const pagatoTotale = Number(t.pagato_totale || 0);
           const mancante = Math.max(0, budgetAtteso - pagatoTotale);
+          const mancanteMinimo = minSpend > 0 ? Math.max(0, minSpend - pagatoTotale) : 0;
           const statoCompleto = t.entrati >= t.prenotati;
           const isSaldato = t.is_saldato || false;
+          const tableLabel = String(t.table_name ?? '').trim();
+          const zonaLabel = String(t.zona ?? '').trim();
+          const primaryTitle = tableLabel || String(t.nome ?? '').trim() || 'Tavolo';
           
           // Calcola importo saldato e aggiunte successive
           const importoSaldato = importiSaldati[t.id] || 0;
@@ -253,60 +283,71 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
           return (
             <View key={t.id} style={[styles.tableCard, isSaldato && styles.tableCardPaid]}>
               <View style={styles.tableHeader}>
-                <View style={{ flex: 1 }}>
+                <View style={styles.tableMainInfo}>
                   <View style={styles.tavoloRow}>
                     <View style={styles.tavoloNumberCircle}>
                       <Text style={styles.tavoloNumber}>{t.numero || '?'}</Text>
                     </View>
                     <View>
-                      <Text style={styles.tableTitle}>{t.nome}</Text>
+                      <Text style={styles.tableTitle}>{primaryTitle}</Text>
                       <View style={styles.personeRow}>
                         <Feather name="users" size={14} color="rgba(255,255,255,0.7)" />
                         <Text style={styles.tableInfo}>
                           {t.entrati}/{t.prenotati} {statoCompleto ? '✓' : 'persone'}
                         </Text>
                       </View>
-                      {t.zona && (
-                        <Text style={styles.zonaText}>📍 {t.zona}</Text>
+                      {zonaLabel ? (
+                        <Text style={styles.zonaText}>
+                          📍 Zona: {zonaLabel}
+                        </Text>
+                      ) : null}
+                      {minSpend > 0 ? (
+                        <Text style={styles.minSpendText}>
+                          Minimo spesa: €{minSpend} {mancanteMinimo > 0 ? `• Manca €${mancanteMinimo.toFixed(2)}` : '• Raggiunto'}
+                        </Text>
+                      ) : (
+                        <Text style={styles.minSpendText}>Nessun minimo spesa</Text>
                       )}
                     </View>
                   </View>
                 </View>
-                
-                <View style={styles.budgetBadge}>
-                  {isSaldato && importoSaldato > 0 ? (
-                    <>
-                      <View style={styles.saldatoDetail}>
-                        <Text style={styles.saldatoLabel}>Saldato</Text>
-                        <Text style={styles.saldatoAmount}>€{importoSaldato.toFixed(2)}</Text>
-                      </View>
-                      {aggiuntoDopoSaldo > 0 && (
-                        <View style={styles.aggiuntoDetail}>
-                          <Text style={styles.aggiuntoLabel}>+ Aggiunte</Text>
-                          <Text style={styles.aggiuntoAmount}>€{aggiuntoDopoSaldo.toFixed(2)}</Text>
-                        </View>
-                      )}
-                      <View style={styles.totaleDetail}>
-                        <Text style={styles.totaleLabel}>Totale</Text>
-                        <Text style={styles.budgetAmount}>€{pagatoTotale.toFixed(2)}</Text>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.budgetAmount}>€{pagatoTotale.toFixed(2)}</Text>
-                      {mancante > 0 && !isSaldato && (
-                        <Text style={styles.mancaText}>Manca: €{mancante.toFixed(2)}</Text>
-                      )}
-                    </>
-                  )}
-                  {isSaldato && (
+                {!isSaldato && (
+                  <View style={styles.budgetBadge}>
+                    <Text style={styles.budgetAmount}>€{pagatoTotale.toFixed(2)}</Text>
+                    {mancante > 0 && (
+                      <Text style={styles.mancaText}>Manca: €{mancante.toFixed(2)}</Text>
+                    )}
+                  </View>
+                )}
+              </View>
+
+              {isSaldato && (
+                <View style={styles.paidSummaryContainer}>
+                  <View style={styles.paidSummaryHeader}>
                     <View style={styles.paidBadge}>
                       <Feather name="check" size={14} color="#22c55e" />
                       <Text style={styles.paidText}>Saldato</Text>
                     </View>
+                    <Text style={styles.paidTotalAmount}>€{pagatoTotale.toFixed(2)}</Text>
+                  </View>
+
+                  {importoSaldato > 0 && (
+                    <View style={styles.paidBreakdownRow}>
+                      <View style={styles.paidBreakdownItem}>
+                        <Text style={styles.saldatoLabel}>Importo saldato</Text>
+                        <Text style={styles.saldatoAmount}>€{importoSaldato.toFixed(2)}</Text>
+                      </View>
+
+                      {aggiuntoDopoSaldo > 0 && (
+                        <View style={styles.paidBreakdownItemRight}>
+                          <Text style={styles.aggiuntoLabel}>Aggiunte dopo saldo</Text>
+                          <Text style={styles.aggiuntoAmount}>+€{aggiuntoDopoSaldo.toFixed(2)}</Text>
+                        </View>
+                      )}
+                    </View>
                   )}
                 </View>
-              </View>
+              )}
 
               <View style={styles.budgetInfo}>
                 <Text style={styles.budgetInfoText}>
@@ -428,8 +469,9 @@ const styles = StyleSheet.create({
   },
 
   tableCardPaid: {
-    opacity: 0.6,
-    backgroundColor: "rgba(34, 197, 94, 0.1)",
+    backgroundColor: "rgba(34, 197, 94, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.35)",
   },
 
   tableHeader: {
@@ -437,6 +479,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 16,
+  },
+
+  tableMainInfo: {
+    flex: 1,
+    paddingRight: 12,
   },
 
   tavoloRow: {
@@ -486,6 +533,8 @@ const styles = StyleSheet.create({
 
   budgetBadge: {
     alignItems: "flex-end",
+    flexShrink: 0,
+    minWidth: 96,
   },
 
   budgetAmount: {
@@ -498,7 +547,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginTop: 8,
     backgroundColor: "rgba(34,197,94,0.25)",
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -542,8 +590,11 @@ const styles = StyleSheet.create({
   },
 
   paidTableMoneyButton: {
-    backgroundColor: "rgba(59, 130, 246, 0.75)",
-    opacity: 0.85,
+    backgroundColor: "#1D4ED8",
+    borderWidth: 1,
+    borderColor: "#93C5FD",
+    shadowColor: "#1D4ED8",
+    shadowOpacity: 0.4,
   },
 
   payButton: {
@@ -609,6 +660,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
+  minSpendText: {
+    color: "#FBBF24",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 6,
+  },
+
   mancaText: {
     color: "#f59e0b",
     fontSize: 13,
@@ -636,6 +694,45 @@ const styles = StyleSheet.create({
 
   saldatoDetail: {
     marginBottom: 4,
+  },
+
+  paidSummaryContainer: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+
+  paidSummaryHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+
+  paidTotalAmount: {
+    color: "#22c55e",
+    fontSize: 24,
+    fontWeight: "900",
+  },
+
+  paidBreakdownRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+
+  paidBreakdownItem: {
+    flex: 1,
+  },
+
+  paidBreakdownItemRight: {
+    flex: 1,
+    alignItems: "flex-end",
   },
 
   saldatoLabel: {

@@ -1,18 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, ScrollView, Alert, Platform, ToastAndroid, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, ScrollView, Alert, Platform, ToastAndroid } from "react-native";
 import { useTheme } from "../../theme/ThemeProvider";
 import { getReservation, cancelReservation } from "../../services/reservations";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
-import * as MediaLibrary from "expo-media-library";
-import * as FileSystem from "expo-file-system";
 
 export default function ReservationDetailScreen({ route, navigation }: any) {
   const { id } = route.params;
   const { theme } = useTheme();
   const [res, setRes] = useState<any>(null);
   const [qrOpen, setQrOpen] = useState(false);
-  const [savingQr, setSavingQr] = useState(false);
 
   const load = async () => {
     const r = await getReservation(id);
@@ -48,10 +45,12 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=800x800&data=${encodeURIComponent(qrValue)}`;
 
   const eventName = res.event?.name ?? res.event_id;
+  const zoneLabel = res.venue_table?.zona ?? res.venue_table?.nome ?? '';
   const tableLabel = res.venue_table?.numero
     ? `Tavolo ${res.venue_table.numero}`
-    : res.venue_table?.nome ?? 'Tavolo';
-  const zoneLabel = res.venue_table?.zona ?? '';
+    : zoneLabel
+      ? `Zona ${zoneLabel}`
+      : 'Zona richiesta';
 
   const cancellationBlockReason = (() => {
     if (isCheckedIn) return 'Prenotazione completata';
@@ -68,55 +67,6 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
     Alert.alert('Info', message);
   };
 
-  const saveQrToGallery = async () => {
-    if (savingQr) return;
-
-    try {
-      setSavingQr(true);
-
-      const currentPermission = await MediaLibrary.getPermissionsAsync(true, ['photo']);
-      let granted = currentPermission.granted;
-
-      if (!granted) {
-        const requestedPermission = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
-        granted = requestedPermission.granted;
-      }
-
-      if (!granted) {
-        Alert.alert(
-          'Permesso richiesto',
-          'Per salvare il QR devi consentire l\'accesso a Foto/Galleria nelle impostazioni del telefono.',
-          [
-            { text: 'Annulla', style: 'cancel' },
-            {
-              text: 'Apri impostazioni',
-              onPress: () => {
-                void Linking.openSettings();
-              },
-            },
-          ],
-        );
-        return;
-      }
-
-      const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
-      if (!dir) {
-        Alert.alert('Errore', 'Impossibile accedere allo storage del dispositivo.');
-        return;
-      }
-
-      const fileUri = `${dir}reservation-qr-${res.id}.png`;
-      await FileSystem.downloadAsync(qrImageUrl, fileUri);
-
-      await MediaLibrary.saveToLibraryAsync(fileUri);
-      showMessage('QR salvato in galleria');
-    } catch {
-      Alert.alert('Errore', 'Non sono riuscito a salvare il QR in galleria.');
-    } finally {
-      setSavingQr(false);
-    }
-  };
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={["top", "bottom"]}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -124,7 +74,7 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
           <Text style={[styles.eventTitle, { color: theme.colors.text }]}>{eventName}</Text>
           {res.type === 'table' ? (
             <Text style={[styles.metaText, { color: theme.colors.muted }]}>
-              {zoneLabel ? `${zoneLabel} • ` : ''}{tableLabel}
+              {tableLabel}
             </Text>
           ) : (
             <Text style={[styles.metaText, { color: isCheckedIn ? theme.colors.primary : theme.colors.muted }]}> 
@@ -135,7 +85,7 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
 
         <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
           <Text style={[styles.label, { color: theme.colors.muted }]}>Tipo</Text>
-          <Text style={[styles.value, { color: theme.colors.text }]}>{res.type === 'table' ? 'Prenotazione tavolo' : 'Ingresso QR'}</Text>
+          <Text style={[styles.value, { color: theme.colors.text }]}>{res.type === 'table' ? 'Prenotazione zona tavolo' : 'Ingresso QR'}</Text>
 
           {res.guests ? <Text style={[styles.infoLine, { color: theme.colors.muted }]}>{res.guests} persone</Text> : null}
 
@@ -149,11 +99,6 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
               </View>
 
               <View style={styles.qrActionsRow}>
-                <TouchableOpacity onPress={saveQrToGallery} disabled={savingQr} style={[styles.actionBtnGhost, { borderColor: theme.colors.border }]}> 
-                  <Feather name={savingQr ? "loader" : "download"} size={16} color={theme.colors.text} />
-                  <Text style={[styles.actionGhostText, { color: theme.colors.text }]}>{savingQr ? 'Salvataggio...' : 'Salva in galleria'}</Text>
-                </TouchableOpacity>
-
                 <TouchableOpacity
                   onPress={() => setQrOpen(true)}
                   style={[styles.actionBtnPrimary, { backgroundColor: theme.colors.primary }]}
@@ -211,13 +156,6 @@ export default function ReservationDetailScreen({ route, navigation }: any) {
             <View style={styles.modalActions}>
               <TouchableOpacity style={[styles.modalBtnGhost, { borderColor: theme.colors.border }]} onPress={() => setQrOpen(false)}>
                 <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Chiudi</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtnPrimary, { backgroundColor: theme.colors.primary }]}
-                onPress={saveQrToGallery}
-                disabled={savingQr}
-              >
-                <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{savingQr ? 'Salvataggio...' : 'Salva'}</Text>
               </TouchableOpacity>
             </View>
           </View>

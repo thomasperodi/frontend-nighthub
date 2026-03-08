@@ -4,6 +4,7 @@ import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { useAuth } from "../../../providers/AuthProvider";
 import { deleteAccountApi } from "../../../services/auth";
+import appConfig from "../../../../app.json";
 
 interface ProfileTabProps {
   navigation: any;
@@ -14,6 +15,7 @@ export default function ProfileTab({ navigation }: ProfileTabProps) {
   const { signOut, user } = useAuth();
   const displayEmail = user?.email || "email@example.com";
   const displayName = user?.email?.split("@")[0] || "Utente";
+  const appVersion = appConfig?.expo?.version || "1.0.0";
 
   const confirmDelete = () => {
     Alert.alert('Elimina account', 'Sei sicuro di voler eliminare il tuo account? Questa azione è irreversibile.', [
@@ -139,7 +141,7 @@ export default function ProfileTab({ navigation }: ProfileTabProps) {
         </TouchableOpacity>
 
         <View style={{ marginTop: 32, alignItems: 'center' }}>
-          <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '500' }}>Versione app 1.0.0</Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '500' }}>Versione app {appVersion}</Text>
         </View>
       </View>
     </ScrollView>

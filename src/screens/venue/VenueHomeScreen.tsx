@@ -4,7 +4,7 @@ import { useTheme } from "../../theme/ThemeProvider";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import BottomNav, { NavItem } from "../../components/BottomNav";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../providers/AuthProvider";
 import { fetchEventsByVenue, fetchEventStats } from "../../services/events";
 import { fetchReservationsByEvent } from "../../services/reservations";
@@ -18,6 +18,7 @@ import CreateReservationModal from "../../components/CreateReservationModal";
 import ProfileScreen from "./ProfileScreen";
 import VenueTablesScreen from "./VenueTablesScreen";
 import VenueReservationsTab from "./components/VenueReservationsTab";
+import VenueTransactionsScreen from "./VenueTransactionsScreen";
 
 import { Event, EventStats } from "../../types/events";
 import type { Reservation } from "../../types/reservations";
@@ -72,6 +73,7 @@ export default function VenueHomeScreen() {
   const [eventStats, setEventStats] = useState<EventStats>({
     event_id: '',
     total_entries: 0,
+    total_entries_revenue: 0,
     total_bar: 0,
     total_cloakroom: 0,
     total_tables: 0,
@@ -87,6 +89,7 @@ export default function VenueHomeScreen() {
     setEventStats({
       event_id: '',
       total_entries: 0,
+      total_entries_revenue: 0,
       total_bar: 0,
       total_cloakroom: 0,
       total_tables: 0,
@@ -126,6 +129,8 @@ export default function VenueHomeScreen() {
     if (!selectedEventId) return null;
     return venueEvents.find((e) => e.id === selectedEventId) ?? null;
   };
+
+  const selectedEvent = useMemo(() => getSelectedEvent(), [selectedEventId, venueEvents]);
 
   const loadReservationsForSelectedEvent = async (opts?: { refreshing?: boolean }) => {
     const eventId = selectedEventId;
@@ -228,6 +233,7 @@ export default function VenueHomeScreen() {
           setEventStats({
             event_id: effectiveSelectedEventId,
             total_entries: 0,
+            total_entries_revenue: 0,
             total_bar: 0,
             total_cloakroom: 0,
             total_tables: 0,
@@ -307,10 +313,11 @@ export default function VenueHomeScreen() {
   };
 
   const getTotalRevenue = (): number => {
+    const entryRevenue = toNumber(eventStats?.total_entries_revenue);
     const bar = toNumber(eventStats?.total_bar);
     const tables = toNumber(eventStats?.total_tables);
     const cloakroom = toNumber(eventStats?.total_cloakroom);
-    return bar + tables + cloakroom;
+    return entryRevenue + bar + tables + cloakroom;
   };
 
 
@@ -341,12 +348,12 @@ const renderDashboard = () => (
     contentContainerStyle={{ paddingBottom: 120 }}
     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
   >
-    {loading && !liveEvent ? (
+    {loading && !selectedEvent ? (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#6D5BFF" />
         <Text style={styles.loadingText}>Caricamento dati...</Text>
       </View>
-    ) : error && !liveEvent ? (
+    ) : error && !selectedEvent ? (
       <View style={styles.errorContainer}>
         <Feather name="alert-circle" size={48} color="#ef4444" />
         <Text style={styles.errorText}>{error}</Text>
@@ -370,22 +377,14 @@ const renderDashboard = () => (
               {venueName ?? (user?.venue_id ? 'Locale' : 'Dashboard')}
             </Text>
             {(() => {
-              if (liveEvent) {
+              if (selectedEvent) {
+                const st = normalizeEventStatus(selectedEvent.status);
+                const dot = st === 'LIVE' ? '#22c55e' : st === 'DRAFT' ? '#f59e0b' : '#9ca3af';
                 return (
                   <View style={styles.liveRow}>
-                    <View style={styles.liveDot} />
-                    <Text style={styles.liveText}>{liveEvent.name}</Text>
-                  </View>
-                );
-              }
-              const selected = getSelectedEvent();
-              if (selected) {
-                const st = normalizeEventStatus(selected.status);
-                return (
-                  <View style={styles.liveRow}>
-                    <View style={[styles.liveDot, { backgroundColor: '#9ca3af' }]} />
-                    <Text style={[styles.liveText, { color: '#9ca3af' }]}>
-                      {st ? `${st} • ` : ''}{selected.name}
+                    <View style={[styles.liveDot, { backgroundColor: dot }]} />
+                    <Text style={[styles.liveText, { color: dot }]}>
+                      {st ? `${st} • ` : ''}{selectedEvent.name}
                     </Text>
                   </View>
                 );
@@ -403,7 +402,7 @@ const renderDashboard = () => (
           </TouchableOpacity>
         </View>
 
-        {liveEvent && (
+        {selectedEvent && (
           <>
             {/* KPI REVENUE */}
             <View style={styles.kpiSection}>
@@ -414,6 +413,12 @@ const renderDashboard = () => (
                   value={`€${getTotalRevenue().toFixed(2)}`}
                   icon="dollar-sign" 
                   color="#4ECDC4"
+                />
+                <KpiCard 
+                  label="Ingresso" 
+                  value={`€${toNumber(eventStats?.total_entries_revenue).toFixed(2)}`}
+                  icon="log-in" 
+                  color="#22c55e"
                 />
                 <KpiCard 
                   label="Bar" 
@@ -520,12 +525,11 @@ const renderDashboard = () => (
               {(() => {
                 const tableRes = eventReservations.filter((r) => r.type === 'table');
                 const totalGuests = tableRes.reduce((s, r) => s + (r.guests || 0), 0);
-                const selected = getSelectedEvent();
                 return (
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <View style={{ flex: 1, paddingRight: 10 }}>
                   <Text style={styles.resSummaryText}>
-                    {selected ? `${formatEventDate(selected.date)} • ${selected.name}` : 'Evento selezionato'}
+                    {selectedEvent ? `${formatEventDate(selectedEvent.date)} • ${selectedEvent.name}` : 'Evento selezionato'}
                   </Text>
                   <Text style={styles.resSummarySubText}>
                     Prenotazioni: {tableRes.length} • Ospiti: {totalGuests}
@@ -567,15 +571,14 @@ const renderDashboard = () => (
             {/* EVENTO */}
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Evento</Text>
             {(() => {
-              const selected = getSelectedEvent();
-              if (!selected) return null;
-              const st = normalizeEventStatus(selected.status);
+              if (!selectedEvent) return null;
+              const st = normalizeEventStatus(selectedEvent.status);
               const dot = st === 'LIVE' ? '#22c55e' : st === 'DRAFT' ? '#f59e0b' : '#9ca3af';
               return (
                 <View style={styles.eventCard}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.eventTitle}>{selected.name}</Text>
-                    <Text style={styles.eventSubtitle}>{formatEventDate(selected.date)}</Text>
+                    <Text style={styles.eventTitle}>{selectedEvent.name}</Text>
+                    <Text style={styles.eventSubtitle}>{formatEventDate(selectedEvent.date)}</Text>
                     <View style={styles.eventStatus}>
                       <View style={[styles.statusDot, { backgroundColor: dot }]} />
                       <Text style={[styles.eventStatusText, { color: dot }]}>{st || '—'}</Text>
@@ -590,7 +593,7 @@ const renderDashboard = () => (
           </>
         )}
 
-        {!liveEvent && !loading && (
+        {!selectedEvent && !loading && (
           <View style={styles.noEventContainer}>
             <Feather name="calendar" size={64} color="rgba(255,255,255,0.3)" />
             {venueEvents.length > 0 ? (
@@ -670,13 +673,13 @@ const renderAnalytics = () => (
     <Text style={[styles.placeholderText, { color: theme.colors.muted }]}>
       Visualizza statistiche e report dettagliati
     </Text> */}
-    <ReportScreen venueId={user?.venue_id} liveEvent={liveEvent} eventStats={eventStats} />
+    <ReportScreen venueId={user?.venue_id} selectedEvent={selectedEvent} eventStats={eventStats} />
   </>
 );
 
 const renderPromos = () => (
   <>
-    <PromosScreen event={liveEvent} venueId={user?.venue_id} />
+    <PromosScreen event={selectedEvent ?? liveEvent} venueId={user?.venue_id} />
   </>
 );
 
@@ -694,6 +697,12 @@ const renderProfile = () => (
       Gestisci le informazioni e impostazioni del locale
     </Text> */}
     <ProfileScreen />
+  </>
+);
+
+const renderTransactions = () => (
+  <>
+    <VenueTransactionsScreen />
   </>
 );
 
@@ -727,6 +736,7 @@ return (
     {currentTab === "tables" && renderTables()}
     {currentTab === "promos" && renderPromos()}
     {currentTab === "analytics" && renderAnalytics()}
+    {currentTab === "transactions" && renderTransactions()}
     {currentTab === "profile" && renderProfile()}
 
     <Modal
@@ -764,6 +774,15 @@ return (
 
           <TouchableOpacity
             style={[styles.moreRow, { borderColor: theme.colors.border }]}
+            onPress={() => { setMoreOpen(false); setCurrentTab('transactions'); }}
+          >
+            <Feather name="credit-card" size={18} color={theme.colors.text} />
+            <Text style={[styles.moreRowText, { color: theme.colors.text }]}>Transazioni</Text>
+            <Feather name="chevron-right" size={18} color={theme.colors.muted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.moreRow, { borderColor: theme.colors.border }]}
             onPress={() => { setMoreOpen(false); setCurrentTab('profile'); }}
           >
             <Feather name="user" size={18} color={theme.colors.text} />
@@ -774,7 +793,7 @@ return (
       </Pressable>
     </Modal>
 
-    <BottomNav items={businessItems} active={currentTab === 'promos' || currentTab === 'analytics' || currentTab === 'profile' ? 'more' : currentTab} onChange={handleBottomNavChange} />
+    <BottomNav items={businessItems} active={currentTab === 'promos' || currentTab === 'analytics' || currentTab === 'transactions' || currentTab === 'profile' ? 'more' : currentTab} onChange={handleBottomNavChange} />
 
     {/* Table Booking Modal */}
     {(getSelectedEvent() ?? liveEvent) && user?.id && (

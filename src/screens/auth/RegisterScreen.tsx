@@ -25,7 +25,6 @@ type GenderValue = "M" | "F" | "ALTRO";
 const GENDER_OPTIONS: { label: string; value: GenderValue }[] = [
   { label: "Uomo", value: "M" },
   { label: "Donna", value: "F" },
-  { label: "Altro", value: "ALTRO" },
 ];
 
 function isValidIsoDate(value: string): boolean {
@@ -94,19 +93,18 @@ export default function RegisterScreen({ navigation }: any) {
       name.trim().length >= 2 &&
       username.trim().length >= 3 &&
       /^\S+@\S+\.\S+$/.test(email.trim()) &&
-      isValidIsoDate(birthDate.trim()) &&
       !!gender &&
       password.length >= 6 &&
       confirmPassword.length >= 6
     );
-  }, [name, username, email, birthDate, gender, password, confirmPassword]);
+  }, [name, username, email, gender, password, confirmPassword]);
 
   const validate = (): string | null => {
     if (name.trim().length < 2) return "Inserisci nome e cognome";
     if (username.trim().length < 3) return "Username minimo 3 caratteri";
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) return "Inserisci un'email valida";
     if (!gender) return "Seleziona il sesso";
-    if (!isValidIsoDate(birthDate.trim())) return "Data di nascita non valida (formato YYYY-MM-DD)";
+    if (birthDate.trim() && !isValidIsoDate(birthDate.trim())) return "Data di nascita non valida (formato YYYY-MM-DD)";
     if (phone.trim() && digitsOnly(phone).length < 6) return "Numero di telefono non valido";
     if (password.length < 6) return "La password deve contenere almeno 6 caratteri";
     if (password !== confirmPassword) return "Le password non coincidono";
@@ -132,7 +130,7 @@ export default function RegisterScreen({ navigation }: any) {
         name: name.trim(),
         phone: phone.trim() ? `+39${digitsOnly(phone)}` : undefined,
         sesso: gender!,
-        birth_date: birthDate.trim(),
+        ...(birthDate.trim() ? { birth_date: birthDate.trim() } : {}),
       });
 
       await signIn(email.trim().toLowerCase(), password);
@@ -288,7 +286,7 @@ export default function RegisterScreen({ navigation }: any) {
                   })}
                 </View>
 
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Data di nascita</Text>
+                <Text style={[styles.label, { color: theme.colors.muted }]}>Data di nascita (opzionale)</Text>
                 <TouchableOpacity
                   onPress={openBirthDatePicker}
                   activeOpacity={0.8}

@@ -221,8 +221,10 @@ export type WaiterTable = {
   event_id?: string | null;
   venue_id?: string | null;
   nome: string; // PR/gruppo name
+  table_name?: string | null;
   zona?: string | null;
   per_testa: number; // spend per person
+  costo_minimo?: number | null;
   prenotati: number; // total booked
   entrati: number; // people entered
   numero?: number | null; // table number
@@ -235,15 +237,47 @@ export type WaiterTable = {
   table_sales?: Array<{ id: string; amount: number; created_at: string }>;
 };
 
+type BackendWaiterTable = Omit<WaiterTable, 'per_testa' | 'costo_minimo' | 'prenotati' | 'entrati' | 'pagato_iniziale' | 'pagato_totale' | 'table_sales'> & {
+  per_testa: any;
+  costo_minimo?: any;
+  prenotati: any;
+  entrati: any;
+  pagato_iniziale?: any;
+  pagato_totale?: any;
+  table_sales?: Array<{ id: string; amount: any; created_at: string }>;
+};
+
+function mapWaiterTable(t: BackendWaiterTable): WaiterTable {
+  return {
+    ...t,
+    per_testa: toNumber(t.per_testa),
+    costo_minimo: t.costo_minimo === null || t.costo_minimo === undefined ? null : toNumber(t.costo_minimo),
+    prenotati: Number(t.prenotati ?? 0),
+    entrati: Number(t.entrati ?? 0),
+    pagato_iniziale:
+      t.pagato_iniziale === null || t.pagato_iniziale === undefined
+        ? null
+        : toNumber(t.pagato_iniziale),
+    pagato_totale:
+      t.pagato_totale === null || t.pagato_totale === undefined
+        ? null
+        : toNumber(t.pagato_totale),
+    table_sales: (t.table_sales ?? []).map((s) => ({
+      ...s,
+      amount: toNumber(s.amount),
+    })),
+  };
+}
+
 export async function getWaiterTables(
   userId: string,
   eventId?: string,
   options?: { onlyBooked?: boolean; venueId?: string },
 ): Promise<WaiterTable[]> {
-  const { data } = await api.get<WaiterTable[]>('/staff/waiter/tables', {
+  const { data } = await api.get<BackendWaiterTable[]>('/staff/waiter/tables', {
     params: { userId, eventId, ...options },
   });
-  return data;
+  return (data ?? []).map(mapWaiterTable);
 }
 
 export async function addTablePayment(
