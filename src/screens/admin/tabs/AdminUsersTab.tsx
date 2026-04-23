@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -11,8 +11,17 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../../theme/ThemeProvider";
-import { fetchAdminUsers, fetchAdminVenues, updateAdminUserAssignment } from "../../../services/admin";
-import { AdminUser, AdminVenue } from "../../../types/admin";
+import {
+  fetchAdminUsers,
+  fetchAdminVenues,
+  updateAdminUserAssignment,
+} from "../../../services/admin";
+import type { AdminUser, AdminVenue } from "../../../types/admin";
+import {
+  formatCompactNumber,
+  formatDateTime,
+  formatRelativeDate,
+} from "../adminUtils";
 
 type UserRole = "client" | "staff" | "venue" | "admin";
 type RoleFilter = "all" | UserRole;
@@ -31,60 +40,50 @@ const STATUS_FILTERS: Array<{ key: StatusFilter; label: string }> = [
   { key: "Inattivo", label: "Inattivi" },
 ];
 
-const toRoleKey = (value: string | undefined): UserRole => {
+function normalizeRole(value?: string): UserRole {
   if (value === "staff" || value === "venue" || value === "admin") return value;
   return "client";
-};
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-
-  return date.toLocaleString("it-IT", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
+}
 
 export default function AdminUsersTab() {
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [venues, setVenues] = useState<AdminVenue[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [savingAssignment, setSavingAssignment] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [userSearch, setUserSearch] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedRole, setSelectedRole] = useState<UserRole>("client");
+  const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [venueSearch, setVenueSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [selectedRole, setSelectedRole] = useState<UserRole>("venue");
-  const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   const loadData = useCallback(async (asRefresh = false) => {
     if (asRefresh) setRefreshing(true);
     else setLoading(true);
-    setError(null);
 
     try {
-      const [usersData, venuesData] = await Promise.all([fetchAdminUsers(), fetchAdminVenues()]);
+      setError(null);
+      const [usersData, venuesData] = await Promise.all([
+        fetchAdminUsers({ force: asRefresh }),
+        fetchAdminVenues({ force: asRefresh }),
+      ]);
       setUsers(usersData);
       setVenues(venuesData);
 
-      if (!selectedUserId && usersData.length > 0) {
-        const first = usersData[0];
-        setSelectedUserId(first.id);
-        setSelectedRole(toRoleKey(first.roleKey));
-        setSelectedVenueId(first.venueId ?? null);
+      const nextSelectedId =
+        usersData.find((user) => user.id === selectedUserId)?.id ?? usersData[0]?.id ?? null;
+      setSelectedUserId(nextSelectedId);
+
+      const selectedUser = usersData.find((user) => user.id === nextSelectedId);
+      if (selectedUser) {
+        setSelectedRole(normalizeRole(selectedUser.roleKey));
+        setSelectedVenueId(selectedUser.venueId ?? null);
       }
     } catch (err: any) {
       setError(String(err?.response?.data?.message || err?.message || "Errore caricamento utenti"));
@@ -103,268 +102,92 @@ export default function AdminUsersTab() {
     [selectedUserId, users],
   );
 
-  const filteredUsers = useMemo(() => {
-    const needle = userSearch.trim().toLowerCase();
-
-    return users.filter((user) => {
-      if (roleFilter !== "all" && toRoleKey(user.roleKey) !== roleFilter) return false;
-      if (statusFilter !== "all" && user.status !== statusFilter) return false;
-
-      if (!needle) return true;
-
-      const haystack = `${user.name} ${user.email ?? ""} ${user.role} ${user.venueName ?? ""}`.toLowerCase();
-      return haystack.includes(needle);
-    });
-  }, [users, userSearch, roleFilter, statusFilter]);
-
-  const filteredVenues = useMemo(() => {
-    const needle = venueSearch.trim().toLowerCase();
-    if (!needle) return venues.slice(0, 20);
-    return venues.filter((venue) => {
-      const haystack = `${venue.name} ${venue.city}`.toLowerCase();
-      return haystack.includes(needle);
-    }).slice(0, 20);
-  }, [venueSearch, venues]);
-
   const summary = useMemo(() => {
     const active = users.filter((user) => user.status === "Attivo").length;
-    const managers = users.filter((user) => user.roleKey === "venue").length;
-    const staff = users.filter((user) => user.roleKey === "staff").length;
+    const inactive = users.length - active;
     const assigned = users.filter((user) => Boolean(user.venueId)).length;
+    const managers = users.filter((user) => normalizeRole(user.roleKey) === "venue").length;
+    const staff = users.filter((user) => normalizeRole(user.roleKey) === "staff").length;
+    const unassignedOperators = users.filter((user) => {
+      const role = normalizeRole(user.roleKey);
+      return (role === "venue" || role === "staff") && !user.venueId;
+    }).length;
 
-    return { active, managers, staff, assigned };
+    return { active, inactive, assigned, managers, staff, unassignedOperators };
   }, [users]);
 
-  const onSelectUser = useCallback((user: AdminUser) => {
+  const filteredUsers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return users.filter((user) => {
+      if (roleFilter !== "all" && normalizeRole(user.roleKey) !== roleFilter) return false;
+      if (statusFilter !== "all" && user.status !== statusFilter) return false;
+      if (!query) return true;
+
+      const haystack = [
+        user.name,
+        user.email ?? "",
+        user.role,
+        user.venueName ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [users, search, roleFilter, statusFilter]);
+
+  const suggestedUsers = useMemo(
+    () => users
+      .filter((user) => {
+        const role = normalizeRole(user.roleKey);
+        return user.status === "Inattivo" || ((role === "venue" || role === "staff") && !user.venueId);
+      })
+      .slice(0, 4),
+    [users],
+  );
+
+  const filteredVenues = useMemo(() => {
+    const query = venueSearch.trim().toLowerCase();
+    if (!query) return venues.slice(0, 8);
+    return venues
+      .filter((venue) => `${venue.name} ${venue.city}`.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [venueSearch, venues]);
+
+  const handleSelectUser = useCallback((user: AdminUser) => {
     setSelectedUserId(user.id);
-    setSelectedRole(toRoleKey(user.roleKey));
+    setSelectedRole(normalizeRole(user.roleKey));
     setSelectedVenueId(user.venueId ?? null);
   }, []);
 
-  const onSaveAssignment = useCallback(async () => {
+  const handleSaveAssignment = useCallback(async () => {
     if (!selectedUserId) {
       setError("Seleziona prima un utente");
       return;
     }
 
     if ((selectedRole === "venue" || selectedRole === "staff") && !selectedVenueId) {
-      setError("Per ruolo Manager/Staff devi selezionare un locale");
+      setError("Manager e staff devono avere un locale assegnato");
       return;
     }
 
-    setSavingAssignment(true);
-    setError(null);
-
     try {
+      setSaving(true);
+      setError(null);
       await updateAdminUserAssignment(selectedUserId, {
         role: selectedRole,
         venue_id: selectedRole === "venue" || selectedRole === "staff" ? selectedVenueId : null,
       });
-
       await loadData(false);
     } catch (err: any) {
-      setError(String(err?.response?.data?.message || err?.message || "Aggiornamento utente non riuscito"));
+      setError(String(err?.response?.data?.message || err?.message || "Salvataggio non riuscito"));
     } finally {
-      setSavingAssignment(false);
+      setSaving(false);
     }
   }, [loadData, selectedRole, selectedUserId, selectedVenueId]);
 
-  const renderUserCard = ({ item }: { item: AdminUser }) => {
-    const selected = item.id === selectedUserId;
-
-    return (
-      <TouchableOpacity
-        style={[styles.userCard, selected ? styles.userCardSelected : null]}
-        onPress={() => onSelectUser(item)}
-      >
-        <View style={styles.userMainInfo}>
-          <Text style={styles.userName}>{item.name}</Text>
-          <Text style={styles.userMeta} numberOfLines={1}>{item.email || "Email non disponibile"}</Text>
-          <Text style={styles.userMeta} numberOfLines={1}>{item.role}</Text>
-          <Text style={styles.userMeta}>Locale: {item.venueName ?? "Nessuno"}</Text>
-        </View>
-
-        <View style={styles.userSideInfo}>
-          <View style={[styles.statusBadge, item.status === "Attivo" ? styles.statusActive : styles.statusInactive]}>
-            <Text style={styles.statusBadgeText}>{item.status}</Text>
-          </View>
-          <Text style={styles.userSideMeta}>{formatDateTime(item.lastActivityAt)}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  const listHeader = (
-    <View style={styles.container}>
-      <View style={styles.heroCard}>
-        <Text style={styles.heroTitle}>Utenti, ruoli e assegnazioni</Text>
-        <Text style={styles.heroSubtitle}>Gestione veloce anche con molti utenti, locali e manager.</Text>
-      </View>
-
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={theme.colors.primary} />
-          <Text style={styles.loadingText}>Caricamento utenti...</Text>
-        </View>
-      ) : null}
-
-      {error ? (
-        <View style={styles.errorCard}>
-          <Feather name="alert-triangle" size={16} color={theme.colors.error} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
-
-      {!loading ? (
-        <View style={styles.kpiRow}>
-          <KpiCard label="Utenti" value={String(users.length)} />
-          <KpiCard label="Attivi" value={String(summary.active)} />
-          <KpiCard label="Manager" value={String(summary.managers)} />
-          <KpiCard label="Assegnati" value={String(summary.assigned)} />
-        </View>
-      ) : null}
-
-      <View style={styles.assignmentPanel}>
-        <Text style={styles.panelTitle}>Assegnazione rapida</Text>
-        <Text style={styles.panelSubtitle}>1) scegli utente • 2) scegli ruolo • 3) scegli locale (se richiesto)</Text>
-
-        <View style={styles.selectedSummary}>
-          <Text style={styles.selectedSummaryTitle}>{selectedUser?.name ?? "Nessun utente selezionato"}</Text>
-          <Text style={styles.selectedSummaryText}>
-            Ruolo attuale: {selectedUser?.role ?? "-"} • Locale: {selectedUser?.venueName ?? "Nessuno"}
-          </Text>
-          <Text style={styles.selectedSummaryMeta}>
-            Ultima attività: {formatDateTime(selectedUser?.lastActivityAt)} • Sessioni 30g: {selectedUser?.sessions30d ?? 0}
-          </Text>
-        </View>
-
-        <View style={styles.rolesRow}>
-          {ROLES.map((role) => {
-            const selected = selectedRole === role.key;
-            return (
-              <TouchableOpacity
-                key={role.key}
-                style={[styles.roleButton, selected ? styles.roleButtonSelected : null]}
-                onPress={() => setSelectedRole(role.key)}
-              >
-                <Text style={[styles.roleButtonText, selected ? styles.roleButtonTextSelected : null]}>{role.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {(selectedRole === "venue" || selectedRole === "staff") ? (
-          <View style={styles.venueSelector}>
-            <TextInput
-              value={venueSearch}
-              onChangeText={setVenueSearch}
-              placeholder="Cerca locale per nome/città"
-              placeholderTextColor={theme.colors.muted}
-              style={styles.input}
-            />
-            <View style={styles.venueList}>
-              <TouchableOpacity
-                style={[styles.venueItem, selectedVenueId === null ? styles.venueItemSelected : null]}
-                onPress={() => setSelectedVenueId(null)}
-              >
-                <Text style={[styles.venueItemText, selectedVenueId === null ? styles.venueItemTextSelected : null]}>Nessun locale</Text>
-              </TouchableOpacity>
-              {filteredVenues.map((venue) => {
-                const selected = selectedVenueId === venue.id;
-                return (
-                  <TouchableOpacity
-                    key={venue.id}
-                    style={[styles.venueItem, selected ? styles.venueItemSelected : null]}
-                    onPress={() => setSelectedVenueId(venue.id)}
-                  >
-                    <Text style={[styles.venueItemText, selected ? styles.venueItemTextSelected : null]} numberOfLines={1}>
-                      {venue.name} • {venue.city}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
-
-        <TouchableOpacity style={styles.primaryButton} onPress={() => void onSaveAssignment()} disabled={savingAssignment}>
-          {savingAssignment ? (
-            <ActivityIndicator size="small" color={theme.colors.text} />
-          ) : (
-            <>
-              <Feather name="save" size={16} color={theme.colors.text} />
-              <Text style={styles.primaryButtonText}>Salva assegnazione</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Lista utenti</Text>
-        <Text style={styles.sectionSubtitle}>Filtra e seleziona rapidamente</Text>
-      </View>
-
-      <TextInput
-        value={userSearch}
-        onChangeText={setUserSearch}
-        placeholder="Cerca utente per nome, email, locale"
-        placeholderTextColor={theme.colors.muted}
-        style={styles.input}
-      />
-
-      <View style={styles.filterRow}>
-        {STATUS_FILTERS.map((item) => {
-          const selected = statusFilter === item.key;
-          return (
-            <TouchableOpacity
-              key={item.key}
-              style={[styles.filterChip, selected ? styles.filterChipSelected : null]}
-              onPress={() => setStatusFilter(item.key)}
-            >
-              <Text style={[styles.filterChipText, selected ? styles.filterChipTextSelected : null]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <View style={styles.filterRow}>
-        <TouchableOpacity
-          style={[styles.filterChip, roleFilter === "all" ? styles.filterChipSelected : null]}
-          onPress={() => setRoleFilter("all")}
-        >
-          <Text style={[styles.filterChipText, roleFilter === "all" ? styles.filterChipTextSelected : null]}>Tutti i ruoli</Text>
-        </TouchableOpacity>
-        {ROLES.map((item) => {
-          const selected = roleFilter === item.key;
-          return (
-            <TouchableOpacity
-              key={item.key}
-              style={[styles.filterChip, selected ? styles.filterChipSelected : null]}
-              onPress={() => setRoleFilter(item.key)}
-            >
-              <Text style={[styles.filterChipText, selected ? styles.filterChipTextSelected : null]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <Text style={styles.resultHint}>Risultati: {filteredUsers.length}</Text>
-    </View>
-  );
-
   return (
-    <FlatList
-      data={filteredUsers}
-      keyExtractor={(item) => item.id}
-      renderItem={renderUserCard}
-      ListHeaderComponent={listHeader}
-      ListEmptyComponent={
-        <View style={styles.emptyState}>
-          <Feather name="users" size={22} color={theme.colors.muted} />
-          <Text style={styles.emptyText}>Nessun utente trovato con i filtri correnti</Text>
-        </View>
-      }
-      ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+    <ScrollView
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
       refreshControl={
@@ -374,14 +197,268 @@ export default function AdminUsersTab() {
           tintColor={theme.colors.primary}
         />
       }
-    />
+    >
+      <View style={styles.container}>
+        <View style={styles.heroCard}>
+          <Text style={styles.heroEyebrow}>NIGHTHUB USERS</Text>
+          <Text style={styles.heroTitle}>Ruoli, assegnazioni e stati utente</Text>
+          <Text style={styles.heroSubtitle}>
+            Centro operativo per riallineare manager e staff ai locali corretti e ridurre account non presidiati.
+          </Text>
+        </View>
+
+        {loading ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color={theme.colors.primary} />
+            <Text style={styles.loadingText}>Caricamento utenti...</Text>
+          </View>
+        ) : null}
+
+        {error ? (
+          <View style={styles.errorCard}>
+            <Feather name="alert-triangle" size={16} color={theme.colors.error} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.kpiGrid}>
+          <KpiCard label="Utenti totali" value={formatCompactNumber(users.length)} note={`${summary.active} attivi`} />
+          <KpiCard label="Operatori assegnati" value={formatCompactNumber(summary.assigned)} note={`${summary.unassignedOperators} da sistemare`} />
+          <KpiCard label="Manager" value={formatCompactNumber(summary.managers)} note={`${summary.staff} staff`} />
+          <KpiCard label="Inattivi" value={formatCompactNumber(summary.inactive)} note="Da riattivare o riposizionare" />
+        </View>
+
+        <View style={styles.panelCard}>
+          <Text style={styles.panelTitle}>Assegnazione rapida</Text>
+          <Text style={styles.panelSubtitle}>
+            Cambia ruolo e locale del profilo selezionato senza uscire dalla lista.
+          </Text>
+
+          <View style={styles.selectedCard}>
+            <Text style={styles.selectedName}>{selectedUser?.name ?? "Nessun utente selezionato"}</Text>
+            <Text style={styles.selectedMeta}>
+              {selectedUser?.email ?? "Email non disponibile"}
+            </Text>
+            <Text style={styles.selectedMeta}>
+              Ruolo attuale {selectedUser?.role ?? "-"} • Locale {selectedUser?.venueName ?? "nessuno"}
+            </Text>
+            <Text style={styles.selectedHint}>
+              Ultima attivita {formatRelativeDate(selectedUser?.lastActivityAt)} • Sessioni 30g {selectedUser?.sessions30d ?? 0}
+            </Text>
+          </View>
+
+          <View style={styles.chipsWrap}>
+            {ROLES.map((role) => {
+              const active = selectedRole === role.key;
+              return (
+                <TouchableOpacity
+                  key={role.key}
+                  style={[styles.choiceChip, active ? styles.choiceChipActive : null]}
+                  onPress={() => setSelectedRole(role.key)}
+                >
+                  <Text style={[styles.choiceChipText, active ? styles.choiceChipTextActive : null]}>
+                    {role.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {(selectedRole === "venue" || selectedRole === "staff") ? (
+            <>
+              <TextInput
+                value={venueSearch}
+                onChangeText={setVenueSearch}
+                placeholder="Cerca locale per nome o citta"
+                placeholderTextColor={theme.colors.muted}
+                style={styles.input}
+              />
+
+              <View style={styles.venueList}>
+                {filteredVenues.map((venue) => {
+                  const active = selectedVenueId === venue.id;
+                  return (
+                    <TouchableOpacity
+                      key={venue.id}
+                      style={[styles.venueRow, active ? styles.venueRowActive : null]}
+                      onPress={() => setSelectedVenueId(venue.id)}
+                    >
+                      <View style={styles.venueRowCopy}>
+                        <Text style={styles.venueRowName}>{venue.name}</Text>
+                        <Text style={styles.venueRowMeta}>{venue.city} • {venue.status}</Text>
+                      </View>
+                      <Feather
+                        name={active ? "check-circle" : "circle"}
+                        size={18}
+                        color={active ? theme.colors.primary : theme.colors.muted}
+                      />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          ) : null}
+
+          <TouchableOpacity style={styles.primaryButton} onPress={() => void handleSaveAssignment()} disabled={saving}>
+            {saving ? (
+              <ActivityIndicator size="small" color={theme.colors.text} />
+            ) : (
+              <>
+                <Feather name="save" size={16} color={theme.colors.text} />
+                <Text style={styles.primaryButtonText}>Salva assegnazione</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Utenti da attenzionare</Text>
+          <Text style={styles.sectionSubtitle}>Le situazioni che bloccano operativita o richiedono follow-up.</Text>
+        </View>
+
+        <View style={styles.alertListCard}>
+          {suggestedUsers.length === 0 ? (
+            <Text style={styles.emptyText}>Nessuna anomalia rilevante al momento.</Text>
+          ) : (
+            suggestedUsers.map((user) => {
+              const role = normalizeRole(user.roleKey);
+              const isUnassignedOperator = (role === "venue" || role === "staff") && !user.venueId;
+              return (
+                <TouchableOpacity key={user.id} style={styles.alertRow} onPress={() => handleSelectUser(user)}>
+                  <View style={styles.alertIconWrap}>
+                    <Feather
+                      name={user.status === "Inattivo" ? "moon" : "briefcase"}
+                      size={15}
+                      color={theme.colors.primary}
+                    />
+                  </View>
+                  <View style={styles.alertCopy}>
+                    <Text style={styles.alertTitle}>{user.name}</Text>
+                    <Text style={styles.alertDetail}>
+                      {user.status === "Inattivo"
+                        ? `Ultima attivita ${formatRelativeDate(user.lastActivityAt)}`
+                        : isUnassignedOperator
+                          ? `${user.role} senza locale assegnato`
+                          : `${user.role} • ${user.venueName ?? "nessun locale"}`}
+                    </Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color={theme.colors.muted} />
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Lista utenti</Text>
+          <Text style={styles.sectionSubtitle}>Filtro rapido per ruolo, stato e locale associato.</Text>
+        </View>
+
+        <View style={styles.searchRow}>
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Cerca nome, email, ruolo o locale"
+            placeholderTextColor={theme.colors.muted}
+            style={[styles.input, styles.searchInput]}
+          />
+          <TouchableOpacity
+            style={[styles.filterToggleButton, filterOpen ? styles.filterToggleButtonActive : null]}
+            onPress={() => setFilterOpen((current) => !current)}
+          >
+            <Feather name="sliders" size={16} color={filterOpen ? theme.colors.primary : theme.colors.muted} />
+          </TouchableOpacity>
+        </View>
+
+        {filterOpen ? (
+          <>
+            <View style={styles.chipsWrap}>
+              {STATUS_FILTERS.map((item) => {
+                const active = statusFilter === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.filterChip, active ? styles.filterChipActive : null]}
+                    onPress={() => setStatusFilter(item.key)}
+                  >
+                    <Text style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}>{item.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.chipsWrap}>
+              <TouchableOpacity
+                style={[styles.filterChip, roleFilter === "all" ? styles.filterChipActive : null]}
+                onPress={() => setRoleFilter("all")}
+              >
+                <Text style={[styles.filterChipText, roleFilter === "all" ? styles.filterChipTextActive : null]}>
+                  Tutti i ruoli
+                </Text>
+              </TouchableOpacity>
+              {ROLES.map((role) => {
+                const active = roleFilter === role.key;
+                return (
+                  <TouchableOpacity
+                    key={role.key}
+                    style={[styles.filterChip, active ? styles.filterChipActive : null]}
+                    onPress={() => setRoleFilter(role.key)}
+                  >
+                    <Text style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}>{role.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+
+        <Text style={styles.resultsHint}>Risultati {filteredUsers.length}</Text>
+
+        <View style={styles.userList}>
+          {filteredUsers.map((user) => {
+            const active = selectedUserId === user.id;
+            const role = normalizeRole(user.roleKey);
+            const needsVenue = (role === "venue" || role === "staff") && !user.venueId;
+            return (
+              <TouchableOpacity
+                key={user.id}
+                style={[styles.userCard, active ? styles.userCardActive : null]}
+                onPress={() => handleSelectUser(user)}
+              >
+                <View style={styles.userCardMain}>
+                  <View style={styles.userCardTopRow}>
+                    <Text style={styles.userName}>{user.name}</Text>
+                    <View style={[styles.statusBadge, user.status === "Attivo" ? styles.statusBadgeActive : null]}>
+                      <Text style={styles.statusBadgeText}>{user.status}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.userMeta}>{user.email ?? "Email non disponibile"}</Text>
+                  <Text style={styles.userMeta}>{user.role} • {user.venueName ?? "nessun locale"}</Text>
+                  <Text style={styles.userHint}>
+                    Ultimo accesso {formatRelativeDate(user.lastActivityAt)} • Sessioni 30g {user.sessions30d ?? 0}
+                  </Text>
+                </View>
+                <View style={styles.userCardSide}>
+                  {needsVenue ? (
+                    <Text style={styles.sideWarning}>Assegna locale</Text>
+                  ) : null}
+                  <Text style={styles.sideMeta}>{formatDateTime(user.lastActivityAt)}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+          {filteredUsers.length === 0 ? <Text style={styles.emptyText}>Nessun utente trovato con i filtri correnti.</Text> : null}
+        </View>
+      </View>
+    </ScrollView>
   );
 
-  function KpiCard({ label, value }: { label: string; value: string }) {
+  function KpiCard({ label, value, note }: { label: string; value: string; note: string }) {
     return (
       <View style={styles.kpiCard}>
         <Text style={styles.kpiLabel}>{label}</Text>
         <Text style={styles.kpiValue}>{value}</Text>
+        <Text style={styles.kpiNote}>{note}</Text>
       </View>
     );
   }
@@ -390,34 +467,40 @@ export default function AdminUsersTab() {
 const createStyles = (theme: any) =>
   StyleSheet.create({
     scrollContent: {
-      paddingHorizontal: 20,
-      paddingTop: 14,
       paddingBottom: 140,
     },
     container: {
-      gap: 12,
-      marginBottom: 12,
+      paddingHorizontal: 20,
+      paddingTop: 6,
+      gap: 16,
     },
     heroCard: {
-      borderRadius: 14,
+      borderRadius: 22,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      padding: 14,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      padding: 18,
       gap: 6,
     },
+    heroEyebrow: {
+      fontSize: 11,
+      fontWeight: "900",
+      color: theme.colors.primary,
+      textTransform: "uppercase",
+      letterSpacing: 0.7,
+    },
     heroTitle: {
-      fontSize: 18,
+      fontSize: 22,
       fontWeight: "900",
       color: theme.colors.text,
     },
     heroSubtitle: {
-      fontSize: 12,
+      fontSize: 13,
+      lineHeight: 19,
       color: theme.colors.muted,
       fontWeight: "600",
-      lineHeight: 18,
     },
-    loadingContainer: {
+    loadingRow: {
       flexDirection: "row",
       alignItems: "center",
       gap: 8,
@@ -428,10 +511,10 @@ const createStyles = (theme: any) =>
       fontWeight: "600",
     },
     errorCard: {
-      borderRadius: 12,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: theme.colors.error,
-      backgroundColor: theme.colors.card,
+      backgroundColor: `${theme.colors.error}14`,
       padding: 12,
       flexDirection: "row",
       alignItems: "center",
@@ -443,20 +526,19 @@ const createStyles = (theme: any) =>
       fontSize: 12,
       fontWeight: "600",
     },
-    kpiRow: {
+    kpiGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
-      gap: 8,
+      gap: 10,
     },
     kpiCard: {
       width: "48%",
-      minHeight: 76,
-      borderRadius: 12,
+      borderRadius: 18,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      padding: 10,
-      justifyContent: "space-between",
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      padding: 14,
+      gap: 6,
     },
     kpiLabel: {
       fontSize: 11,
@@ -464,249 +546,320 @@ const createStyles = (theme: any) =>
       color: theme.colors.muted,
     },
     kpiValue: {
-      fontSize: 17,
+      fontSize: 20,
       fontWeight: "900",
       color: theme.colors.text,
     },
-    assignmentPanel: {
-      borderRadius: 14,
+    kpiNote: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: theme.colors.muted,
+      lineHeight: 16,
+    },
+    panelCard: {
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      padding: 12,
-      gap: 10,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      padding: 14,
+      gap: 12,
     },
     panelTitle: {
-      fontSize: 15,
+      fontSize: 16,
       fontWeight: "900",
       color: theme.colors.text,
     },
     panelSubtitle: {
       fontSize: 12,
+      lineHeight: 17,
       color: theme.colors.muted,
       fontWeight: "600",
     },
-    selectedSummary: {
-      borderRadius: 10,
+    selectedCard: {
+      borderRadius: 16,
       borderWidth: 1,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.surface,
-      padding: 10,
-      gap: 3,
+      padding: 12,
+      gap: 4,
     },
-    selectedSummaryTitle: {
+    selectedName: {
+      fontSize: 14,
+      fontWeight: "900",
       color: theme.colors.text,
-      fontSize: 13,
-      fontWeight: "800",
     },
-    selectedSummaryText: {
-      color: theme.colors.text,
+    selectedMeta: {
       fontSize: 12,
       fontWeight: "600",
+      color: theme.colors.text,
     },
-    selectedSummaryMeta: {
-      color: theme.colors.muted,
+    selectedHint: {
       fontSize: 11,
-      fontWeight: "600",
+      fontWeight: "700",
+      color: theme.colors.muted,
     },
-    rolesRow: {
+    chipsWrap: {
       flexDirection: "row",
       flexWrap: "wrap",
       gap: 8,
     },
-    roleButton: {
-      borderRadius: 10,
+    choiceChip: {
+      borderRadius: 999,
       borderWidth: 1,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.surface,
-      paddingHorizontal: 10,
+      paddingHorizontal: 12,
       paddingVertical: 8,
     },
-    roleButtonSelected: {
+    choiceChipActive: {
       borderColor: theme.colors.primary,
-      backgroundColor: `${theme.colors.primary}22`,
+      backgroundColor: `${theme.colors.primary}18`,
     },
-    roleButtonText: {
-      color: theme.colors.text,
+    choiceChipText: {
       fontSize: 12,
       fontWeight: "800",
-    },
-    roleButtonTextSelected: {
-      color: theme.colors.primary,
-    },
-    venueSelector: {
-      gap: 8,
-    },
-    venueList: {
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
-      padding: 8,
-      gap: 6,
-      maxHeight: 180,
-    },
-    venueItem: {
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
-    },
-    venueItemSelected: {
-      borderColor: theme.colors.primary,
-      backgroundColor: `${theme.colors.primary}22`,
-    },
-    venueItemText: {
       color: theme.colors.text,
-      fontSize: 12,
-      fontWeight: "700",
     },
-    venueItemTextSelected: {
+    choiceChipTextActive: {
       color: theme.colors.primary,
     },
     input: {
-      borderRadius: 12,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.surface,
       color: theme.colors.text,
       paddingHorizontal: 12,
-      paddingVertical: 10,
+      paddingVertical: 11,
       fontSize: 13,
       fontWeight: "600",
     },
-    primaryButton: {
-      borderRadius: 12,
-      backgroundColor: theme.colors.primary,
-      minHeight: 42,
-      paddingHorizontal: 12,
+    searchRow: {
       flexDirection: "row",
       alignItems: "center",
+      gap: 8,
+    },
+    searchInput: {
+      flex: 1,
+    },
+    filterToggleButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      alignItems: "center",
       justifyContent: "center",
+    },
+    filterToggleButtonActive: {
+      borderColor: theme.colors.primary,
+      backgroundColor: `${theme.colors.primary}1F`,
+    },
+    venueList: {
+      gap: 8,
+    },
+    venueRow: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.surface,
+      padding: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+    },
+    venueRowActive: {
+      borderColor: theme.colors.primary,
+      backgroundColor: `${theme.colors.primary}16`,
+    },
+    venueRowCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    venueRowName: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: theme.colors.text,
+    },
+    venueRowMeta: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: theme.colors.muted,
+    },
+    primaryButton: {
+      minHeight: 44,
+      borderRadius: 14,
+      backgroundColor: theme.colors.primary,
+      alignItems: "center",
+      justifyContent: "center",
+      flexDirection: "row",
       gap: 8,
     },
     primaryButtonText: {
       color: theme.colors.text,
       fontSize: 13,
-      fontWeight: "800",
+      fontWeight: "900",
     },
     sectionHeader: {
-      marginTop: 4,
-      gap: 2,
+      gap: 4,
     },
     sectionTitle: {
-      fontSize: 17,
+      fontSize: 18,
       fontWeight: "900",
       color: theme.colors.text,
     },
     sectionSubtitle: {
       fontSize: 12,
+      lineHeight: 17,
       color: theme.colors.muted,
       fontWeight: "600",
     },
-    filterRow: {
+    alertListCard: {
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      padding: 14,
+      gap: 12,
+    },
+    alertRow: {
       flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 6,
+      alignItems: "center",
+      gap: 10,
+    },
+    alertIconWrap: {
+      width: 34,
+      height: 34,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: `${theme.colors.primary}18`,
+    },
+    alertCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    alertTitle: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: theme.colors.text,
+    },
+    alertDetail: {
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: "700",
+      color: theme.colors.muted,
     },
     filterChip: {
       borderRadius: 999,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      paddingHorizontal: 10,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      paddingHorizontal: 11,
       paddingVertical: 7,
     },
-    filterChipSelected: {
+    filterChipActive: {
       borderColor: theme.colors.primary,
-      backgroundColor: `${theme.colors.primary}22`,
+      backgroundColor: `${theme.colors.primary}16`,
     },
     filterChipText: {
       fontSize: 11,
-      color: theme.colors.text,
       fontWeight: "700",
+      color: theme.colors.text,
     },
-    filterChipTextSelected: {
+    filterChipTextActive: {
       color: theme.colors.primary,
     },
-    resultHint: {
+    resultsHint: {
       fontSize: 11,
-      color: theme.colors.muted,
       fontWeight: "700",
+      color: theme.colors.muted,
     },
-    userCard: {
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      padding: 12,
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
+    userList: {
       gap: 10,
     },
-    userCardSelected: {
+    userCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      padding: 14,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    userCardActive: {
       borderColor: theme.colors.primary,
       backgroundColor: `${theme.colors.primary}14`,
     },
-    userMainInfo: {
+    userCardMain: {
       flex: 1,
-      gap: 2,
+      gap: 4,
+    },
+    userCardTopRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
     },
     userName: {
+      flex: 1,
       fontSize: 14,
       fontWeight: "900",
       color: theme.colors.text,
     },
     userMeta: {
+      fontSize: 12,
+      fontWeight: "600",
+      color: theme.colors.text,
+    },
+    userHint: {
       fontSize: 11,
+      lineHeight: 16,
+      fontWeight: "700",
       color: theme.colors.muted,
-      fontWeight: "600",
     },
-    userSideInfo: {
+    userCardSide: {
       alignItems: "flex-end",
-      gap: 5,
+      justifyContent: "space-between",
+      gap: 6,
+      maxWidth: 96,
     },
-    userSideMeta: {
+    sideWarning: {
       fontSize: 10,
+      fontWeight: "900",
+      color: theme.colors.error,
+      textAlign: "right",
+    },
+    sideMeta: {
+      fontSize: 10,
+      fontWeight: "700",
       color: theme.colors.muted,
-      fontWeight: "600",
-      maxWidth: 100,
       textAlign: "right",
     },
     statusBadge: {
-      paddingHorizontal: 10,
-      paddingVertical: 5,
       borderRadius: 999,
       borderWidth: 1,
-    },
-    statusActive: {
-      borderColor: theme.colors.accent,
-      backgroundColor: `${theme.colors.accent}22`,
-    },
-    statusInactive: {
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.surface,
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+    },
+    statusBadgeActive: {
+      borderColor: theme.colors.accent,
+      backgroundColor: `${theme.colors.accent}18`,
     },
     statusBadgeText: {
-      color: theme.colors.text,
       fontSize: 10,
-      fontWeight: "800",
-    },
-    emptyState: {
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      paddingVertical: 22,
-      alignItems: "center",
-      gap: 8,
+      fontWeight: "900",
+      color: theme.colors.text,
     },
     emptyText: {
-      color: theme.colors.muted,
       fontSize: 12,
+      lineHeight: 18,
       fontWeight: "600",
+      color: theme.colors.muted,
     },
   });

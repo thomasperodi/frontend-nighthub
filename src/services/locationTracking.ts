@@ -6,12 +6,16 @@ import * as TaskManager from "expo-task-manager";
 export const LOCATION_TASK_NAME = "nightapp-location-tracking";
 export const GEOFENCE_TASK_NAME = "nightapp-venue-geofence";
 const STORAGE_KEY = "lastLocationUpdate";
+const LOCATION_SYNC_KEY = "friendLocationLastSyncAt";
+const LOCATION_PERMISSION_SYNC_KEY = "friendLocationPermissionState";
 const GEOFENCE_STATE_KEY = "venueGeofenceState";
 const GEOFENCE_LOG_KEY = "venueGeofenceLog";
 const VENUE_STAY_ACTIVE_KEY = "venueStayActive";
 const VENUE_STAY_LOG_KEY = "venueStayLog";
 const TOKEN_KEY = "auth_token";
+const USER_KEY = "auth_user";
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const LOCATION_SYNC_INTERVAL_MS = 45 * 1000;
 
 export type StoredLocation = {
   coords: {
@@ -30,6 +34,41 @@ type ActiveVenueStay = {
   entered_at: number;
 };
 
+const getCurrentLocationScope = async () => {
+  try {
+    const rawUser = await SecureStore.getItemAsync(USER_KEY);
+    if (!rawUser) {
+      return "anonymous";
+    }
+
+    const user = JSON.parse(rawUser) as { id?: string | null };
+    const userId = String(user?.id ?? "").trim();
+    return userId.length > 0 ? userId : "anonymous";
+  } catch {
+    return "anonymous";
+  }
+};
+
+const getScopedStorageKey = async (baseKey: string) => {
+  const scope = await getCurrentLocationScope();
+  return `${baseKey}:${scope}`;
+};
+
+const getScopedItem = async (baseKey: string) => {
+  const scopedKey = await getScopedStorageKey(baseKey);
+  return AsyncStorage.getItem(scopedKey);
+};
+
+const setScopedItem = async (baseKey: string, value: string) => {
+  const scopedKey = await getScopedStorageKey(baseKey);
+  await AsyncStorage.setItem(scopedKey, value);
+};
+
+const removeScopedItem = async (baseKey: string) => {
+  const scopedKey = await getScopedStorageKey(baseKey);
+  await AsyncStorage.removeItem(scopedKey);
+};
+
 const persistLocation = async (location: Location.LocationObject) => {
   const payload: StoredLocation = {
     coords: {
@@ -40,7 +79,127 @@ const persistLocation = async (location: Location.LocationObject) => {
     timestamp: location.timestamp || Date.now(),
   };
 
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  await setScopedItem(STORAGE_KEY, JSON.stringify(payload));
+};
+
+const sendFriendLocationUpdate = async (payload: {
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  timestamp?: number;
+}) => {
+  if (!API_URL) return false;
+  const token = await SecureStore.getItemAsync(TOKEN_KEY);
+  if (!token) return false;
+
+  try {
+    await fetch(`${API_URL}/friends/location`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        accuracy: payload.accuracy ?? undefined,
+        timestamp: payload.timestamp ? new Date(payload.timestamp).toISOString() : undefined,
+      }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const sendLocationSharingPreference = async (enabled: boolean) => {
+  if (!API_URL) return false;
+  const token = await SecureStore.getItemAsync(TOKEN_KEY);
+  if (!token) return false;
+
+  try {
+    await fetch(`${API_URL}/friends/location-sharing`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ enabled }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const getSystemLocationSharingEnabled = async (): Promise<boolean> => {
+  try {
+    const [foreground, servicesEnabled] = await Promise.all([
+      Location.getForegroundPermissionsAsync(),
+      Location.hasServicesEnabledAsync(),
+    ]);
+    return foreground.status === "granted" && servicesEnabled;
+  } catch {
+    return false;
+  }
+};
+
+export const syncSystemLocationSharingToBackend = async (enabled?: boolean) => {
+  const sharingEnabled = typeof enabled === "boolean"
+    ? enabled
+    : await getSystemLocationSharingEnabled();
+  const normalized = sharingEnabled ? "1" : "0";
+
+  try {
+    const previous = await getScopedItem(LOCATION_PERMISSION_SYNC_KEY);
+    if (previous === normalized) {
+      if (!sharingEnabled) {
+        await removeScopedItem(LOCATION_SYNC_KEY);
+      }
+      return sharingEnabled;
+    }
+
+    const synced = await sendLocationSharingPreference(sharingEnabled);
+    if (synced) {
+      await setScopedItem(LOCATION_PERMISSION_SYNC_KEY, normalized);
+      if (!sharingEnabled) {
+        await removeScopedItem(LOCATION_SYNC_KEY);
+      }
+    }
+  } catch {
+    // Ignore sync cache errors and fall back to the current OS permission state.
+  }
+
+  return sharingEnabled;
+};
+
+const shouldSkipLocationSync = async (force: boolean) => {
+  if (force) return false;
+  const raw = await getScopedItem(LOCATION_SYNC_KEY);
+  const lastSyncAt = raw ? Number(raw) : 0;
+  return Number.isFinite(lastSyncAt) && Date.now() - lastSyncAt < LOCATION_SYNC_INTERVAL_MS;
+};
+
+const syncLocationPayloadToBackend = async (
+  payload: StoredLocation,
+  options?: { force?: boolean },
+) => {
+  const sharingEnabled = await syncSystemLocationSharingToBackend();
+  if (!sharingEnabled) return false;
+  if (await shouldSkipLocationSync(Boolean(options?.force))) return false;
+
+  const synced = await sendFriendLocationUpdate({
+    latitude: payload.coords.latitude,
+    longitude: payload.coords.longitude,
+    accuracy: payload.coords.accuracy,
+    timestamp: payload.timestamp,
+  });
+
+  if (synced) {
+    await setScopedItem(LOCATION_SYNC_KEY, String(Date.now()));
+  }
+
+  return synced;
 };
 
 const sendVenueStayCheckpoint = async (payload: {
@@ -86,7 +245,7 @@ const calculateDistanceKm = (
 };
 
 const getActiveVenueStay = async (): Promise<ActiveVenueStay | null> => {
-  const raw = await AsyncStorage.getItem(VENUE_STAY_ACTIVE_KEY);
+  const raw = await getScopedItem(VENUE_STAY_ACTIVE_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as ActiveVenueStay;
@@ -96,11 +255,11 @@ const getActiveVenueStay = async (): Promise<ActiveVenueStay | null> => {
 };
 
 const setActiveVenueStay = async (stay: ActiveVenueStay) => {
-  await AsyncStorage.setItem(VENUE_STAY_ACTIVE_KEY, JSON.stringify(stay));
+  await setScopedItem(VENUE_STAY_ACTIVE_KEY, JSON.stringify(stay));
 };
 
 const clearActiveVenueStay = async () => {
-  await AsyncStorage.removeItem(VENUE_STAY_ACTIVE_KEY);
+  await removeScopedItem(VENUE_STAY_ACTIVE_KEY);
 };
 
 const logVenueStay = async (stay: {
@@ -109,10 +268,10 @@ const logVenueStay = async (stay: {
   exitedAt: number;
   durationMs: number;
 }) => {
-  const historyRaw = await AsyncStorage.getItem(VENUE_STAY_LOG_KEY);
+  const historyRaw = await getScopedItem(VENUE_STAY_LOG_KEY);
   const history = historyRaw ? (JSON.parse(historyRaw) as typeof stay[]) : [];
   history.unshift(stay);
-  await AsyncStorage.setItem(VENUE_STAY_LOG_KEY, JSON.stringify(history.slice(0, 100)));
+  await setScopedItem(VENUE_STAY_LOG_KEY, JSON.stringify(history.slice(0, 100)));
 };
 
 if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
@@ -182,12 +341,12 @@ if (!TaskManager.isTaskDefined(GEOFENCE_TASK_NAME)) {
       return;
     }
 
-    const raw = await AsyncStorage.getItem(GEOFENCE_STATE_KEY);
+    const raw = await getScopedItem(GEOFENCE_STATE_KEY);
     const state = raw ? (JSON.parse(raw) as Record<string, number>) : {};
 
     if (eventType === Location.GeofencingEventType.Enter) {
       state[region.identifier] = Date.now();
-      await AsyncStorage.setItem(GEOFENCE_STATE_KEY, JSON.stringify(state));
+      await setScopedItem(GEOFENCE_STATE_KEY, JSON.stringify(state));
       await sendVenueStayCheckpoint({
         venue_id: region.identifier,
         event_type: "enter",
@@ -200,7 +359,7 @@ if (!TaskManager.isTaskDefined(GEOFENCE_TASK_NAME)) {
       const enteredAt = state[region.identifier];
       if (enteredAt) {
         delete state[region.identifier];
-        await AsyncStorage.setItem(GEOFENCE_STATE_KEY, JSON.stringify(state));
+        await setScopedItem(GEOFENCE_STATE_KEY, JSON.stringify(state));
 
         const stay = {
           venueId: region.identifier,
@@ -209,10 +368,10 @@ if (!TaskManager.isTaskDefined(GEOFENCE_TASK_NAME)) {
           durationMs: Date.now() - enteredAt,
         };
 
-        const historyRaw = await AsyncStorage.getItem(GEOFENCE_LOG_KEY);
+        const historyRaw = await getScopedItem(GEOFENCE_LOG_KEY);
         const history = historyRaw ? (JSON.parse(historyRaw) as typeof stay[]) : [];
         history.unshift(stay);
-        await AsyncStorage.setItem(GEOFENCE_LOG_KEY, JSON.stringify(history.slice(0, 100)));
+        await setScopedItem(GEOFENCE_LOG_KEY, JSON.stringify(history.slice(0, 100)));
 
         await sendVenueStayCheckpoint({
           venue_id: region.identifier,
@@ -226,10 +385,19 @@ if (!TaskManager.isTaskDefined(GEOFENCE_TASK_NAME)) {
 
 export const persistLocationUpdate = async (location: Location.LocationObject) => {
   await persistLocation(location);
+  const stored: StoredLocation = {
+    coords: {
+      latitude: location.coords.latitude,
+      longitude: location.coords.longitude,
+      accuracy: location.coords.accuracy,
+    },
+    timestamp: location.timestamp || Date.now(),
+  };
+  await syncLocationPayloadToBackend(stored);
 };
 
 export const getLastStoredLocation = async (): Promise<StoredLocation | null> => {
-  const raw = await AsyncStorage.getItem(STORAGE_KEY);
+  const raw = await getScopedItem(STORAGE_KEY);
   if (!raw) return null;
 
   try {
@@ -237,6 +405,12 @@ export const getLastStoredLocation = async (): Promise<StoredLocation | null> =>
   } catch {
     return null;
   }
+};
+
+export const syncStoredLocationToBackend = async (force = false) => {
+  const stored = await getLastStoredLocation();
+  if (!stored) return false;
+  return syncLocationPayloadToBackend(stored, { force });
 };
 
 export const hasBackgroundLocationUpdates = async (): Promise<boolean> => {
@@ -393,7 +567,7 @@ export const stopVenueGeofencing = async () => {
 };
 
 export const getVenueStayHistory = async () => {
-  const raw = await AsyncStorage.getItem(GEOFENCE_LOG_KEY);
+  const raw = await getScopedItem(GEOFENCE_LOG_KEY);
   if (!raw) return [];
   try {
     return JSON.parse(raw) as {
@@ -408,7 +582,7 @@ export const getVenueStayHistory = async () => {
 };
 
 export const getVenueStayMonitoringHistory = async () => {
-  const raw = await AsyncStorage.getItem(VENUE_STAY_LOG_KEY);
+  const raw = await getScopedItem(VENUE_STAY_LOG_KEY);
   if (!raw) return [];
   try {
     return JSON.parse(raw) as {

@@ -23,6 +23,9 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { useAuth } from '../../providers/AuthProvider';
 import { createEvent, fetchEventById, updateEvent } from '../../services/events';
 import { uploadEventPoster } from '../../services/media';
+import { listVenueTables } from '../../services/tables';
+import type { EventTablePricing } from '../../types/events';
+import type { VenueTable } from '../../types/tables';
 import { resolveEventImageUri } from '../../utils/media';
 
 function isValidISODate(value: string) {
@@ -70,6 +73,43 @@ function parseTimeHHMM(value: string): Date {
   now.setSeconds(0);
   now.setMilliseconds(0);
   return now;
+}
+
+function asNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseNullableDecimalInput(value: string): number | null {
+  const clean = String(value ?? '').trim().replace(',', '.');
+  if (!clean) return null;
+  const n = Number(clean);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseNullableIntegerInput(value: string): number | null {
+  const clean = String(value ?? '').trim();
+  if (!clean) return null;
+  const n = Number(clean);
+  return Number.isInteger(n) ? n : null;
+}
+
+function normalizeZoneLabel(table: Pick<VenueTable, 'zona' | 'nome'>): string {
+  const zona = String(table.zona ?? '').trim();
+  if (zona.length) return zona;
+  const nome = String(table.nome ?? '').trim();
+  return nome.length ? nome : 'Senza zona';
+}
+
+function toInputValue(value?: number | null): string {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function sameNumber(a: number | null, b: number | null): boolean {
+  if (a === null && b === null) return true;
+  if (a === null || b === null) return false;
+  return Math.abs(a - b) < 0.001;
 }
 
 function PickerSheet(props: {
@@ -155,6 +195,82 @@ type PromoDraft = {
   status: PromoStatus;
 };
 
+type TablePricingDraft = {
+  id: string;
+  label: string;
+  sourceIds: string[];
+  basePerTesta: number | null;
+  baseCostoMinimo: number | null;
+  basePersoneMax: number | null;
+  includedInEvent: boolean;
+  overrideEnabled: boolean;
+  eventPerTesta: string;
+  eventCostoMinimo: string;
+  eventPersoneMax: string;
+};
+
+function toTablePricingDrafts(
+  baseRows: VenueTable[],
+  eventPricing: EventTablePricing[],
+): TablePricingDraft[] {
+  const hasExplicitSelection = (eventPricing ?? []).length > 0;
+  const pricingByTableId = new Map(
+    (eventPricing ?? []).map((row) => [row.venue_table_id, row]),
+  );
+  const grouped = new Map<string, TablePricingDraft>();
+
+  const scoreDraft = (draft: TablePricingDraft) =>
+    (draft.includedInEvent ? 20 : 0) +
+    (draft.overrideEnabled ? 10 : 0) +
+    (draft.basePerTesta !== null ? 1 : 0) +
+    (draft.baseCostoMinimo !== null ? 1 : 0) +
+    (draft.basePersoneMax !== null ? 1 : 0);
+
+  for (const row of baseRows) {
+    const label = normalizeZoneLabel(row);
+    const key = label.toLowerCase();
+    const eventRow = pricingByTableId.get(row.id);
+    const draft: TablePricingDraft = {
+      id: row.id,
+      label,
+      sourceIds: [row.id],
+      basePerTesta: asNumber(row.per_testa),
+      baseCostoMinimo: asNumber(row.costo_minimo),
+      basePersoneMax:
+        row.persone_max === null || row.persone_max === undefined
+          ? null
+          : Number(row.persone_max),
+      includedInEvent: hasExplicitSelection ? Boolean(eventRow) : true,
+      overrideEnabled: Boolean(eventRow?.has_override),
+      eventPerTesta: toInputValue(eventRow?.override_per_testa ?? null),
+      eventCostoMinimo: toInputValue(eventRow?.override_costo_minimo ?? null),
+      eventPersoneMax: toInputValue(eventRow?.override_persone_max ?? null),
+    };
+
+    if (!grouped.has(key)) {
+      grouped.set(key, draft);
+      continue;
+    }
+
+    const existing = grouped.get(key)!;
+    existing.sourceIds.push(row.id);
+
+    if (scoreDraft(draft) > scoreDraft(existing)) {
+      existing.id = draft.id;
+      existing.basePerTesta = draft.basePerTesta;
+      existing.baseCostoMinimo = draft.baseCostoMinimo;
+      existing.basePersoneMax = draft.basePersoneMax;
+      existing.includedInEvent = draft.includedInEvent;
+      existing.overrideEnabled = draft.overrideEnabled;
+      existing.eventPerTesta = draft.eventPerTesta;
+      existing.eventCostoMinimo = draft.eventCostoMinimo;
+      existing.eventPersoneMax = draft.eventPersoneMax;
+    }
+  }
+
+  return Array.from(grouped.values()).sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function uid() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
@@ -192,13 +308,64 @@ export default function CreateEventScreen() {
 
   const [priceRules, setPriceRules] = useState<PriceRuleDraft[]>([]);
   const [promos, setPromos] = useState<PromoDraft[]>([]);
+  const [baseTableRows, setBaseTableRows] = useState<VenueTable[]>([]);
+  const [existingTablePricing, setExistingTablePricing] = useState<EventTablePricing[]>([]);
+  const [tablePricingDrafts, setTablePricingDrafts] = useState<TablePricingDraft[]>([]);
 
+  const [tablePricingOpen, setTablePricingOpen] = useState(false);
   const [pricesOpen, setPricesOpen] = useState(false);
   const [promosOpen, setPromosOpen] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [loadingExisting, setLoadingExisting] = useState(false);
+  const [loadingTablePricing, setLoadingTablePricing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const activeTableSelections = useMemo(
+    () => tablePricingDrafts.filter((draft) => draft.includedInEvent).length,
+    [tablePricingDrafts],
+  );
+
+  const activeTableOverrides = useMemo(
+    () =>
+      tablePricingDrafts.filter(
+        (draft) => draft.includedInEvent && draft.overrideEnabled,
+      ).length,
+    [tablePricingDrafts],
+  );
+
+  useEffect(() => {
+    if (!venueId) {
+      setBaseTableRows([]);
+      setExistingTablePricing([]);
+      setTablePricingDrafts([]);
+      return;
+    }
+
+    const loadTablePricingBase = async () => {
+      try {
+        setLoadingTablePricing(true);
+        const rows = await listVenueTables(venueId);
+        setBaseTableRows(Array.isArray(rows) ? rows : []);
+      } catch (e: any) {
+        const statusCode = e?.response?.status;
+        const msg = e?.response?.data?.message || e?.message || 'Errore caricamento listino tavoli';
+        setError((prev) => prev ?? (statusCode ? `${msg} (${statusCode})` : msg));
+        setBaseTableRows([]);
+      } finally {
+        setLoadingTablePricing(false);
+      }
+    };
+
+    void loadTablePricingBase();
+  }, [venueId]);
+
+  useEffect(() => {
+    setTablePricingDrafts(toTablePricingDrafts(baseTableRows, existingTablePricing));
+    if (existingTablePricing.length > 0) {
+      setTablePricingOpen(true);
+    }
+  }, [baseTableRows, existingTablePricing]);
 
   useEffect(() => {
     if (!isEdit || !editEventId) return;
@@ -271,6 +438,9 @@ export default function CreateEventScreen() {
             status: pr.status === 'inactive' || pr.status === 'expired' ? pr.status : 'active',
           })),
         );
+        setExistingTablePricing(
+          Array.isArray(existing.table_pricing) ? existing.table_pricing : [],
+        );
       } catch (e: any) {
         const statusCode = e?.response?.status;
         const msg = e?.response?.data?.message || e?.message || 'Errore caricamento evento';
@@ -282,6 +452,11 @@ export default function CreateEventScreen() {
 
     void loadExisting();
   }, [isEdit, editEventId]);
+
+  useEffect(() => {
+    if (isEdit) return;
+    setExistingTablePricing([]);
+  }, [isEdit]);
 
   const canSubmit = useMemo(() => {
     if (!venueId) return false;
@@ -320,8 +495,39 @@ export default function CreateEventScreen() {
       }
     }
 
+    for (const draft of tablePricingDrafts) {
+      if (!draft.includedInEvent || !draft.overrideEnabled) continue;
+
+      const perHead = parseNullableDecimalInput(draft.eventPerTesta);
+      if (draft.eventPerTesta.trim() && (perHead === null || perHead < 0)) {
+        return false;
+      }
+
+      const minimum = parseNullableDecimalInput(draft.eventCostoMinimo);
+      if (draft.eventCostoMinimo.trim() && (minimum === null || minimum < 0)) {
+        return false;
+      }
+
+      const maxPeople = parseNullableIntegerInput(draft.eventPersoneMax);
+      if (draft.eventPersoneMax.trim() && (maxPeople === null || maxPeople < 1)) {
+        return false;
+      }
+    }
+
     return true;
-  }, [venueId, name, date, startTime, endTime, accessMode, presalePrice, presaleCapacity, priceRules, promos]);
+  }, [
+    venueId,
+    name,
+    date,
+    startTime,
+    endTime,
+    accessMode,
+    presalePrice,
+    presaleCapacity,
+    priceRules,
+    promos,
+    tablePricingDrafts,
+  ]);
 
   const pickPoster = async () => {
     try {
@@ -376,6 +582,88 @@ export default function CreateEventScreen() {
         status: 'active',
       },
     ]);
+  };
+
+  const toggleTableOverride = (draftId: string, enabled: boolean) => {
+    setTablePricingDrafts((prev) =>
+      prev.map((draft) => {
+        if (draft.id !== draftId) return draft;
+        return {
+          ...draft,
+          includedInEvent: true,
+          overrideEnabled: enabled,
+          eventPerTesta: enabled ? toInputValue(draft.basePerTesta) : '',
+          eventCostoMinimo: enabled ? toInputValue(draft.baseCostoMinimo) : '',
+          eventPersoneMax: enabled ? toInputValue(draft.basePersoneMax) : '',
+        };
+      }),
+    );
+  };
+
+  const toggleTableSelection = (draftId: string, included: boolean) => {
+    setTablePricingDrafts((prev) =>
+      prev.map((draft) => {
+        if (draft.id !== draftId) return draft;
+        if (included) {
+          return {
+            ...draft,
+            includedInEvent: true,
+          };
+        }
+
+        return {
+          ...draft,
+          includedInEvent: false,
+          overrideEnabled: false,
+          eventPerTesta: '',
+          eventCostoMinimo: '',
+          eventPersoneMax: '',
+        };
+      }),
+    );
+  };
+
+  const updateTablePricingDraft = (
+    draftId: string,
+    patch: Partial<Pick<TablePricingDraft, 'eventPerTesta' | 'eventCostoMinimo' | 'eventPersoneMax'>>,
+  ) => {
+    setTablePricingDrafts((prev) =>
+      prev.map((draft) => (draft.id === draftId ? { ...draft, ...patch } : draft)),
+    );
+  };
+
+  const resetAllTableOverrides = () => {
+    setTablePricingDrafts((prev) =>
+      prev.map((draft) => ({
+        ...draft,
+        overrideEnabled: false,
+        eventPerTesta: '',
+        eventCostoMinimo: '',
+        eventPersoneMax: '',
+      })),
+    );
+  };
+
+  const selectAllTableZones = () => {
+    setTablePricingDrafts((prev) =>
+      prev.map((draft) => ({
+        ...draft,
+        includedInEvent: true,
+      })),
+    );
+  };
+
+  const clearSelectedTableZones = () => {
+    setTablePricingDrafts((prev) =>
+      prev.map((draft) => ({
+        ...draft,
+        includedInEvent: false,
+        overrideEnabled: false,
+        eventPerTesta: '',
+        eventCostoMinimo: '',
+        eventPersoneMax: '',
+      })),
+    );
   };
 
   const effectivePricesOpen = pricesOpen || priceRules.length > 0;
@@ -443,6 +731,25 @@ export default function CreateEventScreen() {
       }
     }
 
+    for (const draft of tablePricingDrafts) {
+      if (!draft.includedInEvent || !draft.overrideEnabled) continue;
+
+      const perHead = parseNullableDecimalInput(draft.eventPerTesta);
+      if (draft.eventPerTesta.trim() && (perHead === null || perHead < 0)) {
+        return setError(`Costo a persona non valido per ${draft.label}`);
+      }
+
+      const minimum = parseNullableDecimalInput(draft.eventCostoMinimo);
+      if (draft.eventCostoMinimo.trim() && (minimum === null || minimum < 0)) {
+        return setError(`Minimo spesa non valido per ${draft.label}`);
+      }
+
+      const maxPeople = parseNullableIntegerInput(draft.eventPersoneMax);
+      if (draft.eventPersoneMax.trim() && (maxPeople === null || maxPeople < 1)) {
+        return setError(`Capienza non valida per ${draft.label}`);
+      }
+    }
+
     try {
       setSubmitting(true);
       setError(null);
@@ -482,6 +789,34 @@ export default function CreateEventScreen() {
         status: p.status,
       }));
 
+      const table_pricing = tablePricingDrafts.flatMap((draft) => {
+        if (!draft.includedInEvent) return [];
+
+        const perHead = parseNullableDecimalInput(draft.eventPerTesta);
+        const minimum = parseNullableDecimalInput(draft.eventCostoMinimo);
+        const maxPeople = parseNullableIntegerInput(draft.eventPersoneMax);
+
+        const overridePerTesta =
+          draft.overrideEnabled && !sameNumber(perHead, draft.basePerTesta)
+            ? perHead ?? undefined
+            : undefined;
+        const overrideCostoMinimo =
+          draft.overrideEnabled && !sameNumber(minimum, draft.baseCostoMinimo)
+            ? minimum ?? undefined
+            : undefined;
+        const overridePersoneMax =
+          draft.overrideEnabled && !sameNumber(maxPeople, draft.basePersoneMax)
+            ? maxPeople ?? undefined
+            : undefined;
+
+        return draft.sourceIds.map((venue_table_id) => ({
+          venue_table_id,
+          per_testa: overridePerTesta,
+          costo_minimo: overrideCostoMinimo,
+          persone_max: overridePersoneMax,
+        }));
+      });
+
       const basePayload: any = {
         venue_id: venueId,
         name: trimmedName,
@@ -508,12 +843,14 @@ export default function CreateEventScreen() {
           ...basePayload,
           // In edit mode we always send arrays (even empty) so users can clear them.
           entry_prices,
+          table_pricing,
           promos: promos_payload,
         });
       } else {
         await createEvent({
           ...basePayload,
           entry_prices: entry_prices.length ? entry_prices : undefined,
+          table_pricing: table_pricing.length ? table_pricing : undefined,
           promos: promos_payload.length ? promos_payload : undefined,
         });
       }
@@ -851,6 +1188,208 @@ export default function CreateEventScreen() {
             style={[styles.input, styles.textArea, { color: theme.colors.text }]}
             multiline
           />
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            onPress={() => setTablePricingOpen((v) => !v)}
+            activeOpacity={0.85}
+            style={styles.sectionToggleRow}
+          >
+            <View style={styles.sectionToggleLeft}>
+              <Feather name={tablePricingOpen ? 'chevron-down' : 'chevron-right'} size={18} color={theme.colors.muted} />
+              <Text style={[styles.sectionTitle, { color: theme.colors.text, marginBottom: 0 }]}>Tavoli e prive</Text>
+              <Text style={[styles.sectionMeta, { color: theme.colors.muted }]}>
+                {activeTableSelections === 0
+                  ? 'Nessuna zona inclusa'
+                  : activeTableOverrides > 0
+                    ? `${activeTableSelections} zone incluse • ${activeTableOverrides} override`
+                    : `${activeTableSelections} zone incluse`}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {tablePricingOpen ? (
+            <>
+              {loadingTablePricing ? (
+                <View style={styles.inlineLoadingRow}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                  <Text style={[styles.hint, { color: theme.colors.muted, marginTop: 0 }]}>Carico le zone configurate nel locale…</Text>
+                </View>
+              ) : tablePricingDrafts.length === 0 ? (
+                <Text style={[styles.hint, { color: theme.colors.muted }]}>Configura prima le zone in “Zone del locale”: qui potrai applicare prezzi speciali solo per questo evento.</Text>
+              ) : (
+                <>
+                  <View style={[styles.infoPanel, { borderColor: theme.colors.border, backgroundColor: 'rgba(255,255,255,0.04)' }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.infoTitle, { color: theme.colors.text }]}>Scegli quali zone rendere prenotabili</Text>
+                      <Text style={[styles.infoText, { color: theme.colors.muted }]}>Le zone escluse non compariranno nelle prenotazioni dell’evento. Per ogni zona inclusa puoi lasciare il listino base oppure applicare un override dedicato.</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.infoActionsRow}>
+                    {activeTableSelections < tablePricingDrafts.length ? (
+                      <TouchableOpacity onPress={selectAllTableZones} style={[styles.ghostActionBtn, { borderColor: theme.colors.border }]}>
+                        <Feather name="check-square" size={14} color={theme.colors.text} />
+                        <Text style={[styles.ghostActionText, { color: theme.colors.text }]}>Tutte</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {activeTableSelections > 0 ? (
+                      <TouchableOpacity onPress={clearSelectedTableZones} style={[styles.ghostActionBtn, { borderColor: theme.colors.border }]}>
+                        <Feather name="slash" size={14} color={theme.colors.text} />
+                        <Text style={[styles.ghostActionText, { color: theme.colors.text }]}>Nessuna</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {activeTableOverrides > 0 ? (
+                      <TouchableOpacity onPress={resetAllTableOverrides} style={[styles.ghostActionBtn, { borderColor: theme.colors.border }]}>
+                        <Feather name="rotate-ccw" size={14} color={theme.colors.text} />
+                        <Text style={[styles.ghostActionText, { color: theme.colors.text }]}>Reset override</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+
+                  {tablePricingDrafts.map((draft) => {
+                    const basePerHead = draft.basePerTesta !== null ? `€${draft.basePerTesta}` : '—';
+                    const baseMinimum = draft.baseCostoMinimo !== null ? `€${draft.baseCostoMinimo}` : '—';
+                    const baseMax = draft.basePersoneMax !== null ? String(draft.basePersoneMax) : '—';
+                    const statusLabel = !draft.includedInEvent
+                      ? 'Esclusa'
+                      : draft.overrideEnabled
+                        ? 'Override'
+                        : 'Inclusa';
+                    const statusBorderColor = !draft.includedInEvent
+                      ? 'rgba(255,255,255,0.12)'
+                      : draft.overrideEnabled
+                        ? 'rgba(109,91,255,0.35)'
+                        : 'rgba(34,197,94,0.32)';
+                    const statusBackgroundColor = !draft.includedInEvent
+                      ? 'rgba(255,255,255,0.05)'
+                      : draft.overrideEnabled
+                        ? 'rgba(109,91,255,0.18)'
+                        : 'rgba(34,197,94,0.14)';
+                    const statusTextColor = !draft.includedInEvent
+                      ? theme.colors.muted
+                      : draft.overrideEnabled
+                        ? theme.colors.primary
+                        : '#86efac';
+
+                    return (
+                      <View key={draft.id} style={styles.tablePricingCard}>
+                        <View style={styles.tablePricingHeader}>
+                          <View style={{ flex: 1 }}>
+                            <View style={styles.tablePricingTitleRow}>
+                              <Text style={[styles.ruleTitle, { color: theme.colors.text, fontSize: 14 }]}>{draft.label}</Text>
+                              <View
+                                style={[
+                                  styles.pricingStatePill,
+                                  {
+                                    borderColor: statusBorderColor,
+                                    backgroundColor: statusBackgroundColor,
+                                  },
+                                ]}
+                              >
+                                <Text style={[styles.pricingStateText, { color: statusTextColor }]}>
+                                  {statusLabel}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={[styles.hint, { color: theme.colors.muted, marginTop: 4 }]}>Listino base: {basePerHead} per testa • minimo {baseMinimum} • max {baseMax}</Text>
+                            {draft.sourceIds.length > 1 ? (
+                              <Text style={[styles.sourceHint, { color: theme.colors.muted }]}>Applicherai lo stesso override a {draft.sourceIds.length} record della stessa zona.</Text>
+                            ) : null}
+                          </View>
+                        </View>
+
+                        <TouchableOpacity
+                          onPress={() => toggleTableSelection(draft.id, !draft.includedInEvent)}
+                          style={[
+                            styles.overrideToggle,
+                            {
+                              borderColor: draft.includedInEvent ? '#22c55e' : 'rgba(255,255,255,0.12)',
+                              backgroundColor: draft.includedInEvent ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.04)',
+                            },
+                          ]}
+                        >
+                          <Feather name={draft.includedInEvent ? 'check-square' : 'square'} size={18} color={draft.includedInEvent ? '#22c55e' : theme.colors.muted} />
+                          <Text style={[styles.overrideToggleText, { color: draft.includedInEvent ? theme.colors.text : theme.colors.muted }]}>
+                            {draft.includedInEvent ? 'Zona inclusa nell’evento' : 'Zona esclusa da questo evento'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        {draft.includedInEvent ? (
+                          <>
+                            <TouchableOpacity
+                              onPress={() => toggleTableOverride(draft.id, !draft.overrideEnabled)}
+                              style={[
+                                styles.overrideToggle,
+                                {
+                                  borderColor: draft.overrideEnabled ? theme.colors.primary : 'rgba(255,255,255,0.12)',
+                                  backgroundColor: draft.overrideEnabled ? 'rgba(109,91,255,0.12)' : 'rgba(255,255,255,0.04)',
+                                },
+                              ]}
+                            >
+                              <Feather name={draft.overrideEnabled ? 'toggle-right' : 'toggle-left'} size={18} color={draft.overrideEnabled ? theme.colors.primary : theme.colors.muted} />
+                              <Text style={[styles.overrideToggleText, { color: draft.overrideEnabled ? theme.colors.text : theme.colors.muted }]}> 
+                                {draft.overrideEnabled ? 'Usa prezzi dedicati per questo evento' : 'Usa il listino base del locale'}
+                              </Text>
+                            </TouchableOpacity>
+
+                            {draft.overrideEnabled ? (
+                              <>
+                                <View style={styles.row}>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={[styles.label, { color: theme.colors.muted }]}>Costo a persona</Text>
+                                    <TextInput
+                                      value={draft.eventPerTesta}
+                                      onChangeText={(value) => updateTablePricingDraft(draft.id, { eventPerTesta: value })}
+                                      placeholder={toInputValue(draft.basePerTesta) || 'Es. 30'}
+                                      placeholderTextColor="rgba(255,255,255,0.35)"
+                                      style={[styles.input, styles.compactInput, { color: theme.colors.text }]}
+                                      keyboardType="decimal-pad"
+                                    />
+                                  </View>
+                                  <View style={{ width: 12 }} />
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={[styles.label, { color: theme.colors.muted }]}>Minimo spesa</Text>
+                                    <TextInput
+                                      value={draft.eventCostoMinimo}
+                                      onChangeText={(value) => updateTablePricingDraft(draft.id, { eventCostoMinimo: value })}
+                                      placeholder={toInputValue(draft.baseCostoMinimo) || 'Es. 300'}
+                                      placeholderTextColor="rgba(255,255,255,0.35)"
+                                      style={[styles.input, styles.compactInput, { color: theme.colors.text }]}
+                                      keyboardType="decimal-pad"
+                                    />
+                                  </View>
+                                </View>
+
+                                <Text style={[styles.label, { color: theme.colors.muted }]}>Max persone</Text>
+                                <TextInput
+                                  value={draft.eventPersoneMax}
+                                  onChangeText={(value) => updateTablePricingDraft(draft.id, { eventPersoneMax: value.replace(/[^0-9]/g, '') })}
+                                  placeholder={toInputValue(draft.basePersoneMax) || 'Es. 10'}
+                                  placeholderTextColor="rgba(255,255,255,0.35)"
+                                  style={[styles.input, styles.compactInput, { color: theme.colors.text }]}
+                                  keyboardType="number-pad"
+                                />
+
+                                <Text style={[styles.hint, { color: theme.colors.muted }]}>Se lasci gli stessi valori del listino base, non salvo nessun override inutile.</Text>
+                              </>
+                            ) : (
+                              <Text style={[styles.hint, { color: theme.colors.muted }]}>Questa zona resta prenotabile con il listino base del locale.</Text>
+                            )}
+                          </>
+                        ) : (
+                          <Text style={[styles.hint, { color: theme.colors.muted }]}>Questa zona non verra mostrata nelle prenotazioni tavolo dell’evento.</Text>
+                        )}
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+            </>
+          ) : (
+            <Text style={[styles.hint, { color: theme.colors.muted }]}>Apri la sezione per scegliere quali zone rendere prenotabili e, se serve, applicare prezzi speciali solo ad alcune.</Text>
+          )}
 
           <View style={styles.divider} />
 
@@ -1249,6 +1788,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalDoneText: { color: 'white', fontWeight: '900' },
+  inlineLoadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   row: { flexDirection: 'row', marginTop: 4 },
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 },
   quickBtn: {
@@ -1304,6 +1844,7 @@ const styles = StyleSheet.create({
   },
   statusText: { color: 'white', fontWeight: '900', fontSize: 12 },
   textArea: { minHeight: 110, textAlignVertical: 'top' },
+  compactInput: { paddingVertical: 11 },
   divider: {
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.08)',
@@ -1337,6 +1878,57 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(109,91,255,0.35)',
   },
   smallBtnText: { color: 'white', fontWeight: '900', fontSize: 12 },
+  infoPanel: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  infoTitle: { fontSize: 13, fontWeight: '900', marginBottom: 4 },
+  infoText: { fontSize: 12, fontWeight: '700', lineHeight: 18 },
+  infoActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  ghostActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  ghostActionText: { fontSize: 12, fontWeight: '900' },
+  tablePricingCard: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(0,0,0,0.12)',
+  },
+  tablePricingHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  tablePricingTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  pricingStatePill: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  pricingStateText: { fontSize: 11, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.4 },
+  sourceHint: { marginTop: 6, fontSize: 11, fontWeight: '700' },
+  overrideToggle: {
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  overrideToggleText: { fontSize: 12, fontWeight: '800', flex: 1 },
   ruleCard: {
     marginTop: 12,
     padding: 12,

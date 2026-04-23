@@ -2,21 +2,41 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from "
 import { Feather } from "@expo/vector-icons";
 import { useState, useRef, useEffect } from "react";
 import { recordCloakroomSale, fetchStaffEventStats, listCloakroomSales } from "../../../services/staff";
+import { fetchVenuePricing } from "../../../services/venues";
 import { EventStats } from "../../../types/events";
 
 type Props = {
   showToast: (msg: string) => void;
   eventId: string;
   staffId?: string;
+  venueId?: string;
 };
 
-export default function GuardarobaTab({ showToast, eventId, staffId }: Props) {
+export default function GuardarobaTab({ showToast, eventId, staffId, venueId }: Props) {
   const [count, setCount] = useState(0);
   const [eventStats, setEventStats] = useState<EventStats | null>(null);
+  const [cloakroomPrice, setCloakroomPrice] = useState(3);
   const [recenti, setRecenti] = useState<Array<{ id: number; time: Date }>>([]);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!venueId) {
+      setCloakroomPrice(3);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const pricing = await fetchVenuePricing(venueId);
+        const next = Number(pricing?.cloakroom_unit_price);
+        setCloakroomPrice(Number.isFinite(next) ? next : 3);
+      } catch {
+        setCloakroomPrice(3);
+      }
+    })();
+  }, [venueId]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -50,7 +70,7 @@ export default function GuardarobaTab({ showToast, eventId, staffId }: Props) {
       const { stats } = await recordCloakroomSale({
         event_id: eventId,
         staff_id: staffId,
-        amount: 3, // default ticket per capo
+        amount: cloakroomPrice,
       });
       setEventStats(stats);
     } catch (err) {
@@ -86,6 +106,7 @@ export default function GuardarobaTab({ showToast, eventId, staffId }: Props) {
         <View>
           <Text style={styles.title}>Guardaroba</Text>
           <Text style={styles.subtitle}>Gestione capi</Text>
+          <Text style={styles.priceTag}>€{cloakroomPrice.toFixed(2)} a capo</Text>
         </View>
         <View style={styles.totalBadge}>
           <Text style={styles.totalBadgeText}>{count}</Text>
@@ -179,6 +200,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "rgba(255,255,255,0.6)",
     marginTop: 4,
+  },
+
+  priceTag: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.75)",
+    marginTop: 6,
+    fontWeight: "700",
   },
 
   totalBadge: {

@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Pressable } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeProvider";
 
 const CATEGORIES = ["Musica", "Dj set", "Live", "Latino", "Elettronica", "House"];
@@ -14,6 +15,24 @@ export default function FilterModal({ visible, onClose, onApply, initial, enable
   const [onlyMyPromos, setOnlyMyPromos] = useState<boolean>(initial?.onlyMyPromos || false);
   const [promoTypes, setPromoTypes] = useState<string[]>(initial?.promoTypes || []);
 
+  useEffect(() => {
+    if (!visible) return;
+    setSelected(initial?.categories || []);
+    setOnlyMyPromos(initial?.onlyMyPromos || false);
+    setPromoTypes(initial?.promoTypes || []);
+  }, [initial?.categories, initial?.onlyMyPromos, initial?.promoTypes, visible]);
+
+  const activeCount = useMemo(() => {
+    const promoCount = enablePromoFilters ? promoTypes.length + (onlyMyPromos ? 1 : 0) : 0;
+    return selected.length + promoCount;
+  }, [enablePromoFilters, onlyMyPromos, promoTypes.length, selected.length]);
+
+  const resetFilters = () => {
+    setSelected([]);
+    setOnlyMyPromos(false);
+    setPromoTypes([]);
+  };
+
   const togglePromoType = (t: string) => setPromoTypes((s) => s.includes(t) ? s.filter(x=>x!==t) : [...s, t]);
 
   const toggle = (t: string) => {
@@ -25,49 +44,141 @@ export default function FilterModal({ visible, onClose, onApply, initial, enable
     onClose?.();
   };
 
+  const hasActiveFilters = activeCount > 0;
+
   return (
     <Modal visible={visible} transparent animationType="slide">
-      <View style={[styles.overlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.25)' }]}>
-        <View style={[styles.sheet, { backgroundColor: theme.colors.surface }] }>
-          <Text style={[styles.title, { color: theme.colors.text }]}>Filtra eventi</Text>
-          <ScrollView style={{ maxHeight: 240 }}>
-            <Text style={[styles.section, { color: theme.colors.muted }]}>Categorie</Text>
-            <View style={styles.chips}>
+      <View style={[styles.overlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.56)' : 'rgba(7,12,20,0.24)' }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+
+        <View style={[styles.sheet, { backgroundColor: theme.colors.surface, borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }] }>
+          <View style={styles.handleWrap}>
+            <View style={[styles.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(12,12,12,0.14)' }]} />
+          </View>
+
+          <View style={styles.header}>
+            <View style={styles.headerCopy}>
+              <Text style={[styles.title, { color: theme.colors.text }]}>Filtri</Text>
+              <Text style={[styles.subtitle, { color: theme.colors.muted }]}>
+                {hasActiveFilters ? `${activeCount} filtri attivi` : 'Seleziona cosa vuoi vedere prima'}
+              </Text>
+            </View>
+
+            <View style={styles.headerActions}>
+              {hasActiveFilters ? (
+                <TouchableOpacity
+                  activeOpacity={0.82}
+                  onPress={resetFilters}
+                  style={[styles.resetButton, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(12,12,12,0.04)', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }]}
+                >
+                  <Feather name="rotate-ccw" size={14} color={theme.colors.text} />
+                  <Text style={[styles.resetButtonText, { color: theme.colors.text }]}>Reset</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity
+                activeOpacity={0.82}
+                onPress={onClose}
+                style={[styles.closeButton, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(12,12,12,0.04)', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }]}
+              >
+                <Feather name="x" size={16} color={theme.colors.text} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={[styles.sectionCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(12,12,12,0.025)', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }]}>
+              <View style={styles.sectionHeader}>
+                <View>
+                  <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Categorie</Text>
+                  <Text style={[styles.sectionDescription, { color: theme.colors.muted }]}>Affina la home in base al mood della serata.</Text>
+                </View>
+                <View style={[styles.counterPill, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(12,12,12,0.05)' }]}>
+                  <Text style={[styles.counterPillText, { color: theme.colors.text }]}>{selected.length}</Text>
+                </View>
+              </View>
+
+              <View style={styles.chips}>
               {CATEGORIES.map((c) => (
                 <TouchableOpacity
                   key={c}
+                  activeOpacity={0.82}
                   onPress={() => toggle(c)}
-                  style={[styles.chip, { borderColor: theme.colors.border }, selected.includes(c) && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary } ]}
+                  style={[
+                    styles.chip,
+                    {
+                      borderColor: selected.includes(c) ? theme.colors.primary + '66' : theme.colors.border,
+                      backgroundColor: selected.includes(c) ? theme.colors.primary + '18' : isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF',
+                    },
+                  ]}
                 >
-                  <Text style={[styles.chipText, { color: theme.colors.text }, selected.includes(c) && { color: theme.colors.text }]}>{c}</Text>
+                  <Text style={[styles.chipText, { color: theme.colors.text }]}>{c}</Text>
                 </TouchableOpacity>
               ))}
+              </View>
             </View>
 
             {enablePromoFilters ? (
               <>
-                <View style={{ marginTop: 12 }}>
-                  <Text style={[{ color: theme.colors.muted, marginBottom: 8 }]}>Filtra per tipo di promozione</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                    {PROMO_TYPES.length ? PROMO_TYPES.map((p) => (
-                      <TouchableOpacity key={p} onPress={() => togglePromoType(p)} style={[styles.chip, { borderColor: theme.colors.border }, promoTypes.includes(p) && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary } ]}>
-                        <Text style={[{ color: theme.colors.text }]}>{p}</Text>
-                      </TouchableOpacity>
-                    )) : <Text style={{ color: theme.colors.muted }}>Nessuna promozione tra gli eventi</Text>}
+                <View style={[styles.sectionCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(12,12,12,0.025)', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }]}>
+                  <View style={styles.sectionHeader}>
+                    <View>
+                      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Promozioni</Text>
+                      <Text style={[styles.sectionDescription, { color: theme.colors.muted }]}>Mostra solo le offerte che contano per te.</Text>
+                    </View>
+                    <View style={[styles.counterPill, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(12,12,12,0.05)' }]}>
+                      <Text style={[styles.counterPillText, { color: theme.colors.text }]}>{promoTypes.length + (onlyMyPromos ? 1 : 0)}</Text>
+                    </View>
                   </View>
-                </View>
 
-                <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={[{ color: theme.colors.text, fontWeight: '700' }]}>Solo eventi con le mie promozioni</Text>
-                  <Switch value={onlyMyPromos} onValueChange={setOnlyMyPromos} thumbColor={isDark ? undefined : theme.colors.primary} trackColor={{ true: theme.colors.primary, false: theme.colors.border }} />
+                  <View style={[styles.switchRow, { backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }]}>
+                    <View style={styles.switchCopy}>
+                      <Text style={[styles.switchTitle, { color: theme.colors.text }]}>Solo promo per te</Text>
+                      <Text style={[styles.switchSubtitle, { color: theme.colors.muted }]}>Nasconde le promo generiche e lascia solo quelle personalizzate.</Text>
+                    </View>
+                    <Switch value={onlyMyPromos} onValueChange={setOnlyMyPromos} thumbColor={isDark ? undefined : theme.colors.primary} trackColor={{ true: theme.colors.primary, false: theme.colors.border }} />
+                  </View>
+
+                  <Text style={[styles.fieldLabel, { color: theme.colors.muted }]}>Tipologia promo</Text>
+                  <View style={styles.chips}>
+                    {PROMO_TYPES.length ? PROMO_TYPES.map((p) => (
+                      <TouchableOpacity
+                        key={p}
+                        activeOpacity={0.82}
+                        onPress={() => togglePromoType(p)}
+                        style={[
+                          styles.chip,
+                          {
+                            borderColor: promoTypes.includes(p) ? theme.colors.primary + '66' : theme.colors.border,
+                            backgroundColor: promoTypes.includes(p) ? theme.colors.primary + '18' : isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF',
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.chipText, { color: theme.colors.text }]}>{p}</Text>
+                      </TouchableOpacity>
+                    )) : <Text style={[styles.emptyText, { color: theme.colors.muted }]}>Nessuna promozione disponibile negli eventi caricati.</Text>}
+                  </View>
                 </View>
               </>
             ) : null}
           </ScrollView>
 
-          <View style={styles.actions}>
-            <TouchableOpacity style={styles.cancel} onPress={onClose}><Text style={[styles.cancelText, { color: theme.colors.muted }]}>Annulla</Text></TouchableOpacity>
-            <TouchableOpacity style={[styles.apply, { backgroundColor: theme.colors.primary }]} onPress={apply}><Text style={[styles.applyText, { color: theme.colors.text }]}>Applica</Text></TouchableOpacity>
+          <View style={[styles.actions, { borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }]}>
+            <TouchableOpacity
+              activeOpacity={0.82}
+              style={[styles.cancel, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(12,12,12,0.04)', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }]}
+              onPress={onClose}
+            >
+              <Text style={[styles.cancelText, { color: theme.colors.text }]}>Chiudi</Text>
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.82} style={[styles.apply, { backgroundColor: theme.colors.primary }]} onPress={apply}>
+              <Text style={[styles.applyText, { color: theme.colors.text }]}>Mostra risultati</Text>
+              {hasActiveFilters ? <Text style={[styles.applyMeta, { color: theme.colors.text }]}>{activeCount} attivi</Text> : null}
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -76,17 +187,182 @@ export default function FilterModal({ visible, onClose, onApply, initial, enable
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet: { padding: 18, borderTopLeftRadius: 12, borderTopRightRadius: 12 },
-  title: { fontSize: 16, fontWeight: "800", marginBottom: 12 },
-  section: { marginBottom: 8 },
+  overlay: { flex: 1, justifyContent: "flex-end" },
+  sheet: {
+    paddingTop: 8,
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    maxHeight: "86%",
+  },
+  handleWrap: {
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  handle: {
+    width: 44,
+    height: 5,
+    borderRadius: 999,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 16,
+  },
+  headerCopy: {
+    flex: 1,
+  },
+  title: { fontSize: 24, fontWeight: "800", letterSpacing: -0.4 },
+  subtitle: { marginTop: 4, fontSize: 13, lineHeight: 18, fontWeight: "500" },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  closeButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  resetButton: {
+    minHeight: 38,
+    paddingHorizontal: 12,
+    borderRadius: 19,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  resetButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  content: {
+    flexGrow: 0,
+  },
+  contentContainer: {
+    paddingBottom: 12,
+    gap: 12,
+  },
+  sectionCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  sectionDescription: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "500",
+  },
+  counterPill: {
+    minWidth: 30,
+    height: 30,
+    borderRadius: 15,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  counterPillText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
   chips: { flexDirection: "row", flexWrap: "wrap" },
-  chip: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.04)", marginRight: 8, marginBottom: 8 },
-  chipActive: { backgroundColor: "#9B5CFF", borderColor: "#9B5CFF" },
-  chipText: {  },
-  actions: { flexDirection: "row", justifyContent: "flex-end", marginTop: 12 },
-  cancel: { paddingVertical: 10, paddingHorizontal: 14, marginRight: 8 },
-  cancelText: {  },
-  apply: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10 },
-  applyText: { fontWeight: "700" },
+  chip: {
+    minHeight: 40,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginRight: 8,
+    marginBottom: 8,
+    justifyContent: "center",
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  switchRow: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 14,
+  },
+  switchCopy: {
+    flex: 1,
+  },
+  switchTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  switchSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "500",
+  },
+  fieldLabel: {
+    marginBottom: 10,
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  emptyText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "500",
+  },
+  actions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+    paddingTop: 14,
+    borderTopWidth: 1,
+  },
+  cancel: {
+    flex: 0.9,
+    minHeight: 52,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  apply: {
+    flex: 1.3,
+    minHeight: 52,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  applyText: { fontSize: 14, fontWeight: "800" },
+  applyMeta: { marginTop: 2, fontSize: 11, fontWeight: "600", opacity: 0.8 },
 });

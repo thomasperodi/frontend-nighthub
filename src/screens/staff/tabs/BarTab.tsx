@@ -2,19 +2,18 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Animated }
 import { Feather } from "@expo/vector-icons";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useState, useRef, useEffect } from "react";
-import { useTheme } from "../../../theme/ThemeProvider";
 import { recordBarSale, fetchStaffEventStats, listBarSales } from "../../../services/staff";
+import { fetchVenuePricing } from "../../../services/venues";
 import { EventStats } from "../../../types/events";
+import { DEFAULT_BAR_MENU } from "../../../constants/barMenu";
 
-const PRICES = [
-  { label: "Acqua", price: 3, icon: "water", color: "#3B82F6" },
-  { label: "Shot", price: 4, icon: "fire", color: "#EF4444" },
-  { label: "Coca Cola", price: 5, icon: "bottle-capped", color: "#1F2937" },
-  { label: "Birra", price: 6, icon: "beer", color: "#D97706" },
-  { label: "Red Bull", price: 6, icon: "lightning-bolt", color: "#9333EA" },
-  { label: "Cocktail", price: 10, icon: "glass-cocktail", color: "#EC4899" },
-  { label: "Premium", price: 12, icon: "crown", color: "#F59E0B" },
-];
+const DEFAULT_PRICES = DEFAULT_BAR_MENU.map((item) => ({
+  key: item.key,
+  label: item.label,
+  price: item.defaultPrice,
+  icon: item.icon,
+  color: item.color,
+}));
 
 const PriceCard = ({ item, onPress }: any) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -60,15 +59,42 @@ type Props = {
   showToast: (msg: string) => void;
   eventId: string;
   staffId?: string;
+  venueId?: string;
 };
 
-export default function BarTab({ openPrompt, showToast, eventId, staffId }: Props) {
-  const { theme } = useTheme();
+export default function BarTab({ openPrompt, showToast, eventId, staffId, venueId }: Props) {
   const [vendite, setVendite] = useState(0);
   const [totale, setTotale] = useState(0);
   const [eventStats, setEventStats] = useState<EventStats | null>(null);
+  const [prices, setPrices] = useState(DEFAULT_PRICES);
   const eventIdRef = useRef(eventId);
   const saleQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    if (!venueId) {
+      setPrices(DEFAULT_PRICES);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const pricing = await fetchVenuePricing(venueId);
+        const byKey = new Map(
+          (pricing?.bar_price_list ?? []).map((row) => [String(row.key), Number(row.price)]),
+        );
+        setPrices(
+          DEFAULT_PRICES.map((item) => ({
+            ...item,
+            price: Number.isFinite(byKey.get(item.key))
+              ? Number(byKey.get(item.key))
+              : item.price,
+          })),
+        );
+      } catch {
+        setPrices(DEFAULT_PRICES);
+      }
+    })();
+  }, [venueId]);
 
   // Carica dati pregressi
   useEffect(() => {
@@ -200,9 +226,9 @@ export default function BarTab({ openPrompt, showToast, eventId, staffId }: Prop
         <Feather name="grid" size={18} color="white" /> Aggiungi ordine
       </Text>
       <View style={styles.priceGrid}>
-        {PRICES.map((item) => (
+        {prices.map((item) => (
           <PriceCard 
-            key={item.label} 
+            key={item.key} 
             item={item} 
             onPress={() => aggiungiVendita(item.price)} 
           />

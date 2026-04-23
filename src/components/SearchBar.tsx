@@ -18,18 +18,28 @@ export default function SearchBar({ value, onChange, onOpenFilters }: any) {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-      <Feather name="search" size={18} color={theme.colors.muted} />
+      <Feather name="search" size={17} color={theme.colors.muted} />
       <TextInput
         placeholder="Cerca eventi, locali, tag..."
-        placeholderTextColor={theme.colors.muted}
+        placeholderTextColor={theme.colors.muted + "BB"}
         style={[styles.input, { color: theme.colors.text }]}
         value={local}
         onChangeText={setLocal}
         returnKeyType="search"
       />
-      <TouchableOpacity style={styles.filterBtn} onPress={onOpenFilters} accessibilityRole="button">
-        <Feather name="sliders" size={18} color={theme.colors.muted} />
-        <Text style={[styles.filterText, { color: theme.colors.muted }]}>Filtri</Text>
+      {local.length > 0 && (
+        <TouchableOpacity
+          style={styles.clearBtn}
+          onPress={() => setLocal("")}
+          accessibilityRole="button"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Feather name="x" size={14} color={theme.colors.muted} />
+        </TouchableOpacity>
+      )}
+      <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+      <TouchableOpacity style={styles.filterBtn} onPress={onOpenFilters} accessibilityRole="button" activeOpacity={0.7}>
+        <Feather name="sliders" size={16} color={theme.colors.primary} />
       </TouchableOpacity>
     </View>
   );
@@ -39,23 +49,26 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 14,
+    marginBottom: 8,
     borderWidth: 1,
+    gap: 8,
   },
   input: {
     flex: 1,
-    marginLeft: 8,
+    fontSize: 14,
+  },
+  clearBtn: {
+    padding: 2,
+  },
+  divider: {
+    width: 1,
+    height: 18,
   },
   filterBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingLeft: 12,
-  },
-  filterText: {
-    marginLeft: 6,
-    fontWeight: "600",
+    paddingLeft: 4,
+    paddingRight: 2,
   },
 });

@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState, type AppStateStatus } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { login as apiLogin, persistLogin, clearLogin, restoreLogin, logoutApi } from '../services/auth';
+import { login as apiLogin, persistLogin, clearLogin, restoreLogin, logoutApi, sendActivityHeartbeat } from '../services/auth';
 import { registerForPushNotifications, sendPushToken } from '../services/push';
 import { startVenueStayMonitoring } from '../services/locationTracking';
+import { navigate } from '../navigation/NavigationService';
 
 type PublicUser = { id: string; email: string; role: string; venue_id?: string | null };
 
@@ -55,6 +56,56 @@ export const AuthProvider = ({ children }: any) => {
 
   useEffect(() => {
     if (!user || !token) return;
+
+    let disposed = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const stopHeartbeat = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const ping = async () => {
+      if (disposed) return;
+      try {
+        await sendActivityHeartbeat();
+      } catch {
+        // Ignore transient heartbeat failures.
+      }
+    };
+
+    const startHeartbeat = () => {
+      stopHeartbeat();
+      void ping();
+      intervalId = setInterval(() => {
+        void ping();
+      }, 60 * 1000);
+    };
+
+    if (AppState.currentState === 'active') {
+      startHeartbeat();
+    }
+
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        startHeartbeat();
+        return;
+      }
+
+      stopHeartbeat();
+    });
+
+    return () => {
+      disposed = true;
+      stopHeartbeat();
+      subscription.remove();
+    };
+  }, [token, user?.id]);
+
+  useEffect(() => {
+    if (!user || !token) return;
     if (user.role !== 'client') return;
 
     let mounted = true;
@@ -98,6 +149,33 @@ export const AuthProvider = ({ children }: any) => {
       );
     };
 
+    const handleNotificationRouting = (payload: any) => {
+      if (!payload?.type) return;
+
+      if (payload.type === 'friend_request_received') {
+        navigate('ClientHome', { openTab: 'friends' });
+        return;
+      }
+
+      if (
+        payload.type === 'table_invitation_received' ||
+        payload.type === 'table_invitation_updated' ||
+        payload.type === 'table_invitation_response'
+      ) {
+        navigate('ClientHome', { openTab: 'friends' });
+        return;
+      }
+
+      if (payload.type === 'promo_created') {
+        navigate('ClientHome', { openTab: 'home' });
+        return;
+      }
+
+      if (payload.type === 'venue_stay') {
+        confirmAndStart(payload);
+      }
+    };
+
     const register = async () => {
       const result = await registerForPushNotifications();
       if (!mounted) return;
@@ -115,10 +193,15 @@ export const AuthProvider = ({ children }: any) => {
 
     const responseSub = Notifications.addNotificationResponseReceivedListener((event) => {
       const payload = event.notification.request.content.data as any;
-      if (payload?.type === 'venue_stay') {
-        confirmAndStart(payload);
-      }
+      handleNotificationRouting(payload);
     });
+
+    void (async () => {
+      const lastResponse = await Notifications.getLastNotificationResponseAsync();
+      if (!lastResponse) return;
+      const payload = lastResponse.notification.request.content.data as any;
+      handleNotificationRouting(payload);
+    })();
 
     void register();
 

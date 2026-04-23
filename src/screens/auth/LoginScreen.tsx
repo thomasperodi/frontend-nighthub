@@ -98,33 +98,55 @@ export default function LoginScreen({ navigation }: any) {
           >
               <View style={styles.heroArea}>
                 <Text style={[styles.title, { color: theme.colors.text }]}>Bentornato 👋</Text>
-                <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Accedi in pochi secondi e organizza la tua serata senza stress</Text>
+                <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Se hai gia un account puoi entrare subito</Text>
               </View>
 
               <View style={[styles.valueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-                <View style={styles.valueRow}>
-                  <Feather name="check-circle" size={16} color={theme.colors.primary} />
-                  <Text style={[styles.valueText, { color: theme.colors.text }]}>Prenoti ingressi e tavoli in un attimo</Text>
+                <View style={styles.cardHeaderRow}>
+                  <View style={[styles.cardHeaderIcon, { backgroundColor: `${theme.colors.primary}18` }]}>
+                    <Feather name="user-plus" size={16} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.cardHeaderTextBlock}>
+                    <Text style={[styles.cardHeaderTitle, { color: theme.colors.text }]}>Primo accesso?</Text>
+                    <Text style={[styles.cardHeaderSubtitle, { color: theme.colors.muted }]}>Crea prima il tuo account cliente</Text>
+                  </View>
                 </View>
-                <View style={styles.valueRow}>
-                  <Feather name="check-circle" size={16} color={theme.colors.primary} />
-                  <Text style={[styles.valueText, { color: theme.colors.text }]}>Vedi promo e vantaggi reali subito</Text>
-                </View>
+
+                <View style={[styles.softDivider, { backgroundColor: theme.colors.border }]} />
+
                 <TouchableOpacity
-                  style={styles.reviewOnboardingButton}
+                  style={[styles.primaryActionButton, { backgroundColor: theme.colors.primary }]}
+                  onPress={() => navigation.navigate("Register")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Crea account cliente"
+                >
+                  <Feather name="user-plus" size={16} color={theme.colors.text} />
+                  <Text style={[styles.primaryActionText, { color: theme.colors.text }]}>Crea account cliente</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.reviewOnboardingButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
                   onPress={() => navigation.navigate("Onboarding")}
                   accessibilityRole="button"
                   accessibilityLabel="Rivedi onboarding"
                 >
                   <Feather name="play-circle" size={16} color={theme.colors.primary} />
-                  <Text style={[styles.reviewOnboardingText, { color: theme.colors.primary }]}>Rivedi come funziona</Text>
+                  <Text style={[styles.reviewOnboardingText, { color: theme.colors.primary }]}>Guarda come funziona</Text>
+                  <Feather name="arrow-up-right" size={14} color={theme.colors.primary} />
                 </TouchableOpacity>
               </View>
 
               <View style={[styles.form, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }] }>
+                <View style={styles.formHeader}>
+                  <Text style={[styles.formTitle, { color: theme.colors.text }]}>Hai gia un account?</Text>
+                </View>
+
                 {error ? <Text style={[styles.error, { color: theme.colors.error }]}>{error}</Text> : null}
 
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Email</Text>
+                <View style={styles.labelRow}>
+                  <Feather name="mail" size={14} color={theme.colors.muted} />
+                  <Text style={[styles.label, { color: theme.colors.muted }]}>Email</Text>
+                </View>
                 <TextInput
                   placeholder="nome@esempio.com"
                   placeholderTextColor={theme.colors.muted}
@@ -141,12 +163,15 @@ export default function LoginScreen({ navigation }: any) {
                   accessibilityLabel="Email"
                 />
 
-                <Text style={[styles.label, { marginTop: 8, color: theme.colors.muted }]}>Password</Text>
+                <View style={[styles.labelRow, styles.secondaryLabelRow]}>
+                  <Feather name="lock" size={14} color={theme.colors.muted} />
+                  <Text style={[styles.label, { color: theme.colors.muted }]}>Password</Text>
+                </View>
 
                 <View style={styles.passwordWrapper}>
                   <TouchableOpacity
                     onPress={() => setSecure((s) => !s)}
-                    style={[styles.iconAbove, { backgroundColor: theme.colors.card }]}
+                    style={[styles.iconAbove, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
                     accessibilityRole="button"
                     accessibilityLabel={secure ? "Mostra password" : "Nascondi password"}
                   >
@@ -200,28 +225,49 @@ const styles = StyleSheet.create({
   },
   heroArea: {
     marginTop: 20,
-    marginBottom: 12,
+    marginBottom: 14,
+    gap: 6,
   },
   valueCard: {
-    borderRadius: 14,
+    borderRadius: 20,
     borderWidth: 1,
-    padding: 14,
-    marginBottom: 12,
+    padding: 16,
+    marginBottom: 14,
     gap: 10,
   },
-  valueRow: {
+  cardHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 12,
+    marginBottom: 4,
   },
-  valueText: {
+  cardHeaderIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardHeaderTextBlock: {
+    flex: 1,
+  },
+  cardHeaderTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    marginBottom: 2,
+  },
+  cardHeaderSubtitle: {
     fontSize: 13,
     fontWeight: "600",
-    flex: 1,
+  },
+  softDivider: {
+    height: 1,
+    opacity: 0.9,
+    marginVertical: 2,
   },
   form: {
     padding: 18,
-    borderRadius: 14,
+    borderRadius: 22,
     marginTop: 4,
     borderWidth: 1,
   },
@@ -229,32 +275,67 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: "800",
     marginBottom: 6,
+    letterSpacing: -0.8,
   },
   subtitle: {
     fontSize: 14,
-    marginBottom: 10,
+    lineHeight: 20,
   },
   reviewOnboardingButton: {
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "flex-start",
+    justifyContent: "center",
     gap: 8,
-    paddingVertical: 2,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  primaryActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+  },
+  primaryActionText: {
+    fontSize: 14,
+    fontWeight: "800",
   },
   reviewOnboardingText: {
     fontSize: 14,
     fontWeight: "700",
   },
+  formHeader: {
+    marginBottom: 14,
+  },
+  formTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: -0.4,
+  },
+  labelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
+  secondaryLabelRow: {
+    marginTop: 6,
+  },
   label: {
     fontSize: 12,
-    marginBottom: 6,
+    fontWeight: "700",
   },
   input: {
     paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     marginBottom: 16,
     borderWidth: 1,
+    fontSize: 15,
   },
   passwordWrapper: {
     position: "relative",
@@ -269,6 +350,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 2,
+    borderWidth: 1,
   },
   footer: {
     flexDirection: "row",

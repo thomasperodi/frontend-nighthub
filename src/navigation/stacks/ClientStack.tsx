@@ -5,6 +5,7 @@ import EventDetailScreen from '../../screens/client/EventDetailScreen';
 import PromoDetailScreen from '../../screens/client/PromoDetailScreen';
 import ReservationsScreen from '../../screens/client/ReservationsScreen';
 import ReservationDetailScreen from '../../screens/client/ReservationDetailScreen';
+import PrDashboardScreen from '../../screens/client/PrDashboardScreen';
 import OnboardingScreen from '../../screens/onboarding/OnboardingScreen';
 import SettingsScreen from '../../screens/client/SettingsScreen';
 import HelpSupportScreen from '../../screens/client/HelpSupportScreen';
@@ -19,6 +20,7 @@ export default function ClientStack() {
       <Stack.Screen name="PromoDetail" component={PromoDetailScreen} />
       <Stack.Screen name="Reservations" component={ReservationsScreen} />
       <Stack.Screen name="ReservationDetail" component={ReservationDetailScreen} />
+      <Stack.Screen name="PrDashboard" component={PrDashboardScreen} />
       <Stack.Screen name="Onboarding" component={OnboardingScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />

@@ -3,7 +3,7 @@
     "name": "NightHub",
     "slug": "frontend-app",
     "scheme": "nighthub",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,6 +19,7 @@
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["comgooglemaps"],
         "NSCameraUsageDescription": "Consente di usare la fotocamera per scansionare i QR code degli eventi e delle promozioni all’interno dell’app.",
         "NSPhotoLibraryUsageDescription": "L'app accede alla libreria foto per permetterti di selezionare e caricare le locandine degli eventi che pubblichi. L'immagine selezionata verrà mostrata pubblicamente nella pagina dell’evento.",
         "NSPhotoLibraryAddUsageDescription": "L'app può salvare nella tua libreria le locandine o i contenuti evento generati, solo dopo tua azione esplicita di salvataggio.",
@@ -31,6 +32,16 @@
       "package": "com.perodithomas.nighthub",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
+      "intentQueries": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "google.navigation"
+            }
+          ]
+        }
+      ],
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",

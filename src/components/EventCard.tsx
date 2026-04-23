@@ -7,11 +7,19 @@ import { resolveEventImageUri } from "../utils/media";
 export default function EventCard({ item, onPress }: any) {
   const { theme } = useTheme();
   const [fav, setFav] = useState(false);
+  const [cardHeight, setCardHeight] = useState(140);
   const uri = resolveEventImageUri(item.image);
 
   return (
-    <TouchableOpacity style={[styles.card, { backgroundColor: theme.colors.card }]} onPress={() => onPress?.(item)}>
-      <View style={styles.imageWrap}>
+    <TouchableOpacity
+      style={[styles.card, { backgroundColor: theme.colors.card }]}
+      onPress={() => onPress?.(item)}
+      onLayout={(e) => {
+        const nextHeight = Math.max(140, Math.round(e.nativeEvent.layout.height));
+        if (nextHeight !== cardHeight) setCardHeight(nextHeight);
+      }}
+    >
+      <View style={[styles.imageWrap, { height: cardHeight }]}>
         {uri ? (
           <Image source={{ uri }} style={styles.image} />
         ) : (
@@ -41,8 +49,17 @@ export default function EventCard({ item, onPress }: any) {
         </View>
 
         {item.promos && item.promos.length ? (
-          <View style={[styles.promoInline, { backgroundColor: theme.colors.accent + '12' }]}>
-            <Text style={[styles.promoInlineText, { color: theme.colors.accent }]} numberOfLines={1}>{item.promos[0].title}</Text>
+          <View style={styles.promoWrap}>
+            {item.promos.slice(0, 3).map((promo: any) => (
+              <View key={promo.id} style={[styles.promoInline, { backgroundColor: theme.colors.accent + '12' }]}>
+                <Text style={[styles.promoInlineText, { color: theme.colors.accent }]} numberOfLines={1}>{promo.title}</Text>
+              </View>
+            ))}
+            {item.promos.length > 3 ? (
+              <View style={[styles.promoInline, { backgroundColor: theme.colors.accent + '12' }]}>
+                <Text style={[styles.promoInlineText, { color: theme.colors.accent }]}>+{item.promos.length - 3}</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -61,14 +78,15 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 3,
   },
-  imageWrap: { width: 140, height: 140, position: "relative" },
+  imageWrap: { width: 140, minHeight: 140, position: "relative" },
   image: {
-    width: 140,
-    height: 140,
+    width: "100%",
+    height: "100%",
   },
   badge: { position: "absolute", left: 10, top: 10, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
   badgeText: { fontSize: 12, fontWeight: "800" },
-  promoInline: { marginTop: 8, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, alignSelf: 'flex-start' },
+  promoWrap: { marginTop: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  promoInline: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, alignSelf: 'flex-start' },
   promoInlineText: { fontSize: 12, fontWeight: "700" },
   fav: { position: "absolute", right: 10, top: 10, padding: 6, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.08)" },
   info: {

@@ -21,6 +21,30 @@ type BackendReservationCreateInput = {
   venue_zone_id?: string | null;
   venue_table_id?: string | null;
   table_name?: string | null;
+  meta?: unknown;
+};
+
+export type IncomingTableInvitation = {
+  reservation_id: string;
+  invitation_status: 'pending' | 'accepted' | 'declined';
+  reservation_status: Reservation['status'];
+  invited_at: string;
+  responded_at?: string | null;
+  guests: number;
+  table_name?: string | null;
+  zone_label?: string | null;
+  total_amount?: number | null;
+  inviter: { id: string; name: string };
+  event: {
+    id: string;
+    name: string;
+    date?: string | null;
+    start_time?: string | null;
+    end_time?: string | null;
+  } | null;
+  venue: { id: string; name: string; city?: string | null } | null;
+  invited_group_names: string[];
+  can_respond: boolean;
 };
 
 function normalizeStatus(status: unknown): BackendReservationCreateInput['status'] | undefined {
@@ -67,6 +91,7 @@ function normalizeCreateReservationPayload(input: any): BackendReservationCreate
     table_name_raw === null || table_name_raw === undefined
       ? undefined
       : String(table_name_raw).trim() || null;
+  const meta = input?.meta;
 
   return {
     user_id,
@@ -78,6 +103,7 @@ function normalizeCreateReservationPayload(input: any): BackendReservationCreate
     venue_zone_id,
     venue_table_id: venue_table_id ?? venue_zone_id,
     table_name,
+    meta,
   };
 }
 
@@ -152,6 +178,22 @@ export async function updateReservation(
 export async function cancelReservation(id: string): Promise<Reservation | null> {
   const { data } = await api.post<Reservation>(API_ENDPOINTS.RESERVATIONS.CANCEL(id));
   return data ?? null;
+}
+
+export async function listIncomingTableInvitations(): Promise<IncomingTableInvitation[]> {
+  const { data } = await api.get<IncomingTableInvitation[]>('/reservations/table-invitations/incoming');
+  return Array.isArray(data) ? data : [];
+}
+
+export async function respondToTableInvitation(
+  reservationId: string,
+  response: 'accepted' | 'declined',
+): Promise<IncomingTableInvitation> {
+  const { data } = await api.post<IncomingTableInvitation>(
+    `/reservations/${reservationId}/table-invitations/respond`,
+    { response },
+  );
+  return data;
 }
 
 // ========================================

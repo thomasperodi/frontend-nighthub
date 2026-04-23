@@ -55,19 +55,22 @@ async function preparePosterForUpload(params: {
 
     let bytes: number | null = null;
     try {
-      const info = await FileSystem.getInfoAsync(inputUri, { size: true });
-      bytes = typeof info.size === 'number' ? info.size : null;
+      const info = await FileSystem.getInfoAsync(inputUri);
+      bytes =
+        typeof info === 'object' && info !== null && 'size' in info && typeof info.size === 'number'
+          ? info.size
+          : null;
     } catch {
       // ignore; some URI schemes don't support size
     }
 
     const aggressive = bytes === null ? true : bytes > 1_500_000;
-    const actions: ImageManipulator.Action[] = aggressive ? [{ resize: { width: 1280 } }] : [];
+    const actions = aggressive ? [{ resize: { width: 1280 } }] : [];
     const compress = aggressive ? 0.6 : 0.75;
 
     const out = await ImageManipulator.manipulateAsync(
       inputUri,
-      actions,
+      actions as never,
       {
         compress,
         format: ImageManipulator.SaveFormat.JPEG,
