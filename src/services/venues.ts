@@ -1,6 +1,6 @@
 import { api } from './api';
 import { API_ENDPOINTS } from '../constants/endpoints';
-import { Venue } from '../types/events';
+import { Venue, VenueAnalytics, VenuePricing } from '../types/events';
 
 /**
  * Venues Service - Handles all venue-related API calls
@@ -27,6 +27,11 @@ export async function fetchVenueById(id: string): Promise<Venue | null> {
  */
 export async function fetchVenueStats(id: string): Promise<any> {
   const { data } = await api.get(API_ENDPOINTS.VENUES.STATS(id));
+  return data;
+}
+
+export async function fetchVenueAnalytics(id: string): Promise<VenueAnalytics> {
+  const { data } = await api.get<VenueAnalytics>(API_ENDPOINTS.VENUES.ANALYTICS(id));
   return data;
 }
 
@@ -90,6 +95,22 @@ export async function fetchVenueStripeConnectStatus(
 ): Promise<StripeConnectStatus> {
   const { data } = await api.get<StripeConnectStatus>(
     API_ENDPOINTS.VENUES.STRIPE_CONNECT_STATUS(venueId),
+  );
+  return data;
+}
+
+export async function fetchVenuePricing(venueId: string): Promise<VenuePricing> {
+  const { data } = await api.get<VenuePricing>(API_ENDPOINTS.VENUES.PRICING(venueId));
+  return data;
+}
+
+export async function updateVenuePricing(
+  venueId: string,
+  updates: Partial<Pick<VenuePricing, 'cloakroom_unit_price' | 'bar_price_list'>>,
+): Promise<VenuePricing> {
+  const { data } = await api.patch<VenuePricing>(
+    API_ENDPOINTS.VENUES.PRICING(venueId),
+    updates,
   );
   return data;
 }

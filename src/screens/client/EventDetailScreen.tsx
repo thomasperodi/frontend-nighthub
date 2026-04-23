@@ -1,18 +1,31 @@
-import React, { useMemo } from "react";
-import { View, Text, Image, StyleSheet, ScrollView, TouchableOpacity, Share, ToastAndroid, Alert, Platform, useWindowDimensions } from "react-native";
-import PrimaryButton from "../../components/PrimaryButton";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Platform,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  ToastAndroid,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTheme } from "../../theme/ThemeProvider";
 import TableBookingModal from "../../components/TableBookingModal";
-import { useRef, useState } from "react";
 import { createReservation, fetchReservationsByEvent } from "../../services/reservations";
-import { getUserPromos } from "../../services/userPromos";
-import { useEffect } from "react";
+import { createGroupTableProposal } from "../../services/friends";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { fetchEventById } from "../../services/events";
 import type { Event, EventEntryPrice, Promo } from "../../types/events";
 import { useAuth } from "../../providers/AuthProvider";
 import { resolveEventImageUri } from "../../utils/media";
+import { buildTrackedEventLinks } from "../../utils/deepLinks";
 import { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 import { confirmPaymentIntent, createPaymentSheetIntent } from "../../services/payments";
@@ -36,11 +49,11 @@ function calculateTotalAmount({
 }
 
 export default function EventDetailScreen({ route, navigation }: any) {
-  const { item } = route.params;
+  const item = route?.params?.item ?? null;
+  const routeEventId = route?.params?.id as string | undefined;
   const { theme } = useTheme();
   const { user } = useAuth();
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [userPromos, setUserPromos] = useState<string[]>([]);
   const [event, setEvent] = useState<Event | null>(null);
   const [selectedGender, setSelectedGender] = useState<'ALL' | 'M' | 'F' | 'ALTRO'>('ALL');
   const [previewTime, setPreviewTime] = useState<string | null>(null);
@@ -52,8 +65,9 @@ export default function EventDetailScreen({ route, navigation }: any) {
   const insets = useSafeAreaInsets();
   const storyCardRef = useRef<View>(null);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
+  const backButtonTop = Math.max(insets.top, 12) + 6;
 
-  const eventId = item?.id as string | undefined;
+  const eventId = (item?.id as string | undefined) ?? routeEventId;
 
   useEffect(() => {
     if (!eventId) return;
@@ -67,8 +81,6 @@ export default function EventDetailScreen({ route, navigation }: any) {
     })();
   }, [eventId]);
 
-  useEffect(() => { (async () => { const p = await getUserPromos(); setUserPromos(p || []); })(); }, []);
-
   const display = useMemo(() => {
     const e: any = event ?? item;
     const name = e?.name ?? e?.title ?? '';
@@ -79,6 +91,9 @@ export default function EventDetailScreen({ route, navigation }: any) {
     const image = e?.image ?? null;
     const venue = e?.venue?.name ?? e?.venue ?? '';
     const city = e?.venue?.city ?? e?.city ?? '';
+    const address = e?.venue?.address ?? e?.address ?? '';
+    const latitude = e?.venue?.latitude ?? e?.latitude ?? null;
+    const longitude = e?.venue?.longitude ?? e?.longitude ?? null;
 
     return {
       raw: e,
@@ -88,6 +103,9 @@ export default function EventDetailScreen({ route, navigation }: any) {
       image,
       venue,
       city,
+      address,
+      latitude,
+      longitude,
       promos: (e?.promos ?? []) as Promo[],
       entry_prices: (e?.entry_prices ?? []) as EventEntryPrice[],
       description: e?.description ?? e?.desc ?? '',
@@ -95,7 +113,7 @@ export default function EventDetailScreen({ route, navigation }: any) {
   }, [event, item]);
 
   const posterHeight = useMemo(() => {
-    return Math.round(Math.min(screenHeight * 0.58, Math.max(320, screenWidth * 1.08)));
+    return Math.round(Math.min(screenHeight * 0.56, Math.max(360, screenWidth * 1.06)));
   }, [screenHeight, screenWidth]);
 
   const parseMinutes = (t?: string | null) => {
@@ -132,10 +150,45 @@ export default function EventDetailScreen({ route, navigation }: any) {
     // NOTE: backend reservations schema does not currently store promos; keep UI-only logic out of payload.
 
     try {
-      await createReservation({
-        ...reservation,
-        user_id: user.id,
-      });
+      let successMessage = 'La richiesta tavolo è stata inviata. Il locale confermerà la prenotazione.';
+
+      if (reservation?.mode === 'group-proposal') {
+        const groupIds = Array.isArray(reservation?.group_ids)
+          ? reservation.group_ids.map((groupId: unknown) => String(groupId)).filter(Boolean)
+          : [];
+
+        if (!reservation?.venue_id || !groupIds.length) {
+          throw new Error('Dati proposta gruppo incompleti');
+        }
+
+        await Promise.all(
+          groupIds.map((groupId: string) =>
+            createGroupTableProposal(groupId, {
+              venue_id: String(reservation.venue_id),
+              guests: Number(reservation.guests),
+              note: reservation.note,
+            }),
+          ),
+        );
+
+        successMessage =
+          groupIds.length === 1
+            ? 'Proposta pubblicata nel gruppo. Tutti possono seguirla e votare dalla chat gruppo o dalla tab Attivita.'
+            : `Ho pubblicato ${groupIds.length} proposte nei gruppi selezionati. Trovi voti e stato nella tab Attivita.`;
+      } else {
+        await createReservation({
+          ...reservation,
+          user_id: user.id,
+        });
+
+        const inviteCount = Array.isArray(reservation?.meta?.invited_friend_ids)
+          ? reservation.meta.invited_friend_ids.length
+          : 0;
+        successMessage =
+          inviteCount > 0
+            ? `Richiesta tavolo inviata. Ho avvisato ${inviteCount} ${inviteCount === 1 ? 'amico' : 'amici'}: trovano l'invito nella tab Amici.`
+            : 'La richiesta tavolo è stata inviata. Il locale confermerà la prenotazione.';
+      }
 
       // close modal (if parent still has it open) and return to home
       setBookingOpen(false);
@@ -143,9 +196,9 @@ export default function EventDetailScreen({ route, navigation }: any) {
 
       // show confirmation toast (Android) or alert (iOS)
       if (Platform.OS === 'android') {
-        ToastAndroid.show('Richiesta tavolo inviata', ToastAndroid.SHORT);
+        ToastAndroid.show(successMessage, ToastAndroid.SHORT);
       } else {
-        Alert.alert('Richiesta inviata', 'La richiesta tavolo è stata inviata. Il locale confermerà la prenotazione.');
+        Alert.alert('Richiesta inviata', successMessage);
       }
     } catch (e: any) {
       const status = e?.response?.status;
@@ -231,20 +284,17 @@ export default function EventDetailScreen({ route, navigation }: any) {
   };
 
   const shareEvent = async () => {
-    const androidStoreUrl = process.env.EXPO_PUBLIC_PLAY_STORE_URL || 'https://play.google.com/store/apps/details?id=com.perodithomas.nighthub';
-    const iosStoreUrl = process.env.EXPO_PUBLIC_APP_STORE_URL || '';
-    const genericAppUrl = process.env.EXPO_PUBLIC_APP_SHARE_URL || '';
-    const appUrl = genericAppUrl || (Platform.OS === 'ios' ? iosStoreUrl || androidStoreUrl : androidStoreUrl);
-
-    const eventDeepLink = eventId ? `exp+frontend-app://event/${encodeURIComponent(eventId)}` : '';
-    const posterUrl = display.image ? resolveEventImageUri(display.image) : '';
+    const links = eventId
+      ? buildTrackedEventLinks({ eventId })
+      : null;
 
     try {
-     
-
       await Share.share({
         title: 'NightHub',
-        url: appUrl || eventDeepLink || undefined,
+        message: links
+          ? `Apri evento su NightHub:\n${links.smartUrl}\n\nLink web:\n${links.webUrl}\n\nDeep link app:\n${links.appDeepLink}`
+          : 'Scopri NightHub',
+        url: links?.smartUrl,
       });
     } catch(e) { /* ignore */ }
   };
@@ -303,6 +353,84 @@ export default function EventDetailScreen({ route, navigation }: any) {
   const ticketPriceTotal = (ticketPriceCents / 100).toFixed(2);
   const serviceFeeTotal = (estimatedServiceFeeCents / 100).toFixed(2);
   const totalAmount = (estimatedTotalCents / 100).toFixed(2);
+  const availablePresale = presaleCapacity !== null ? Math.max(presaleCapacity - presaleSold, 0) : null;
+  const eventTag = String(
+    display.raw?.genre ??
+    display.raw?.music_genre ??
+    display.raw?.category ??
+    'Evento',
+  );
+  const accessTag = isPresaleEvent ? 'Prevendita' : 'Lista';
+  const heroVenue = display.venue || 'Location da confermare';
+  const heroAddress = display.address
+    ? `${display.address}${display.city ? ` • ${display.city}` : ''}`
+    : (display.city || 'Dettagli location in arrivo');
+  const venueLatitude = display.latitude !== null && display.latitude !== undefined
+    ? Number(display.latitude)
+    : null;
+  const venueLongitude = display.longitude !== null && display.longitude !== undefined
+    ? Number(display.longitude)
+    : null;
+  const hasVenueCoordinates =
+    Number.isFinite(venueLatitude) &&
+    Number.isFinite(venueLongitude);
+  const hasVenueLocation = Boolean(heroVenue || display.address || display.city || hasVenueCoordinates);
+  const accessIntro = isPresaleEvent
+    ? 'Acquista online e ricevi subito il ticket confermato.'
+    : 'Entra in lista gratis e mostra il QR direttamente all’ingresso.';
+  const highlightTitle = isPresaleEvent ? 'Ingresso garantito tutta la notte' : 'Entrata smart con NightHub';
+  const highlightDescription = isPresaleEvent
+    ? 'Paghi in pochi tocchi e tieni il ticket sempre pronto nella tua area prenotazioni.'
+    : 'Riservi il posto in lista, eviti passaggi inutili e trovi il QR già pronto da mostrare al locale.';
+  const optionSectionTitle = isPresaleEvent ? 'Opzioni di accesso' : 'Dettagli lista';
+  const optionSectionDescription = isPresaleEvent
+    ? 'Scegli il ticket giusto e controlla le fasce disponibili prima di pagare.'
+    : 'Qui trovi le eventuali condizioni della lista, come orario, target e prezzo all’ingresso.';
+
+  const openVenueMap = async () => {
+    if (!hasVenueLocation) {
+      Alert.alert('Posizione non disponibile', 'La posizione del locale non e ancora disponibile per questo evento.');
+      return;
+    }
+
+    const addressLabel = [display.address, display.city].filter(Boolean).join(', ') || display.venue || 'Locale evento';
+    const encodedDestination = encodeURIComponent(addressLabel);
+    const coordinateQuery = hasVenueCoordinates ? `${venueLatitude},${venueLongitude}` : '';
+    const googleMapsAppUrl = Platform.select({
+      ios: hasVenueCoordinates
+        ? `comgooglemaps://?center=${coordinateQuery}&q=${coordinateQuery}`
+        : `comgooglemaps://?q=${encodedDestination}`,
+      android: hasVenueCoordinates
+        ? `google.navigation:q=${coordinateQuery}`
+        : `google.navigation:q=${encodedDestination}`,
+      default: undefined,
+    });
+    const googleMapsWebUrl = hasVenueCoordinates
+      ? `https://www.google.com/maps/search/?api=1&query=${coordinateQuery}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodedDestination}`;
+
+    try {
+      if (googleMapsAppUrl) {
+        const supported = await Linking.canOpenURL(googleMapsAppUrl);
+        if (supported) {
+          await Linking.openURL(googleMapsAppUrl);
+          return;
+        }
+      }
+
+      await Linking.openURL(googleMapsWebUrl);
+      return;
+    } catch {
+      try {
+        await Linking.openURL(googleMapsWebUrl);
+        return;
+      } catch {
+        // fall through to alert below
+      }
+    }
+
+    Alert.alert('Impossibile aprire la mappa', 'Non sono riuscito ad aprire Google Maps su questo dispositivo.');
+  };
 
   const buyPresale = async () => {
     if (!user?.id) {
@@ -372,214 +500,397 @@ export default function EventDetailScreen({ route, navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }] }>
-      <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
-        <View style={styles.topImageWrap}>
-          {display.image ? (
-              <Image
-                source={{ uri: resolveEventImageUri(display.image) }}
-                style={[styles.image, { backgroundColor: theme.colors.card, height: posterHeight }]}
-                resizeMode="cover"
-              />
-          ) : (
-            <View style={[styles.image, { backgroundColor: theme.colors.card, height: posterHeight }]} />
-          )}
-          <TouchableOpacity style={[styles.back, { backgroundColor: theme.colors.primary }]} onPress={() => navigation.goBack()} accessibilityRole="button">
-            <Feather name="arrow-left" size={20} color={theme.colors.text} />
-          </TouchableOpacity>
-        </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={["left", "right"]}>
+      <View style={styles.heroWrap}>
+        {display.image ? (
+          <Image
+            source={{ uri: resolveEventImageUri(display.image) }}
+            style={[styles.heroImage, { backgroundColor: theme.colors.card, height: posterHeight }]}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.heroImage, { backgroundColor: theme.colors.card, height: posterHeight }]} />
+        )}
+        <View style={[styles.heroShadeTop, { height: posterHeight }]} />
+        <View style={[styles.heroShadeBottom, { height: posterHeight, backgroundColor: theme.colors.background }]} />
+        <View style={[styles.heroAccent, { height: posterHeight, backgroundColor: theme.colors.primary }]} />
+      </View>
 
-        <View style={styles.inner}>
-          <Text style={[styles.title, { color: theme.colors.text }]}>{display.name}</Text>
-          <Text style={[styles.meta, { color: theme.colors.muted }]}>{display.date}{display.timeRange ? ` • ${display.timeRange}` : ''}</Text>
-          <Text style={[styles.location, { color: theme.colors.muted }]}>{display.venue}{display.city ? ` • ${display.city}` : ''}</Text>
+      <View style={[styles.floatingHeader, { top: backButtonTop }]}> 
+        <TouchableOpacity
+          style={[styles.glassIconButton, { borderColor: 'rgba(255,255,255,0.12)' }]}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Torna indietro"
+        >
+          <Feather name="arrow-left" size={20} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.glassIconButton, { borderColor: 'rgba(255,255,255,0.12)' }]}
+          onPress={shareStoryCard}
+          disabled={isSharingStory}
+          accessibilityRole="button"
+          accessibilityLabel="Condividi evento"
+        >
+          {isSharingStory ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Feather name="share-2" size={18} color="#FFFFFF" />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        contentInsetAdjustmentBehavior="never"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: isPresaleEvent ? 250 : 188 }}
+      >
+        <View style={{ height: posterHeight - 16 }} />
+
+        <View style={styles.contentWrap}>
+          <View
+            style={[
+              styles.heroCard,
+              {
+                backgroundColor: theme.colors.card,
+                borderColor: theme.colors.border,
+                shadowColor: theme.colors.primary,
+              },
+            ]}
+          >
+            <View style={styles.heroBadgeRow}>
+              <View style={[styles.heroBadgePrimary, { backgroundColor: `${theme.colors.primary}22`, borderColor: `${theme.colors.primary}55` }]}>
+                <Text style={[styles.heroBadgePrimaryText, { color: theme.colors.primary }]}>{eventTag}</Text>
+              </View>
+              <View style={[styles.heroBadgeGhost, { borderColor: `${theme.colors.border}99` }]}>
+                <Text style={[styles.heroBadgeGhostText, { color: theme.colors.text }]}>{accessTag}</Text>
+              </View>
+            </View>
+
+            <Text style={[styles.heroTitle, { color: theme.colors.text }]}>{display.name || 'Evento NightHub'}</Text>
+
+            <View style={[styles.metaCard, { borderColor: `${theme.colors.border}B3`, backgroundColor: `${theme.colors.background}D9` }]}>
+              <View style={styles.metaRow}>
+                <View style={[styles.metaIconWrap, { backgroundColor: `${theme.colors.card}CC`, borderColor: `${theme.colors.border}99` }]}>
+                  <Feather name="calendar" size={18} color={theme.colors.primary} />
+                </View>
+                <View style={styles.metaTextWrap}>
+                  <Text style={[styles.metaTitle, { color: theme.colors.text }]}>{display.date || 'Data da confermare'}</Text>
+                  <Text style={[styles.metaSubtitle, { color: theme.colors.muted }]}>{display.timeRange || 'Orario in aggiornamento'}</Text>
+                </View>
+              </View>
+
+              <View style={[styles.metaDivider, { backgroundColor: `${theme.colors.border}80` }]} />
+
+              <View style={styles.metaRow}>
+                <View style={[styles.metaIconWrap, { backgroundColor: `${theme.colors.card}CC`, borderColor: `${theme.colors.border}99` }]}>
+                  <Feather name="map-pin" size={18} color={theme.colors.primary} />
+                </View>
+                <View style={styles.metaTextWrap}>
+                  <Text style={[styles.metaTitle, { color: theme.colors.text }]}>{heroVenue}</Text>
+                  <Text style={[styles.metaSubtitle, { color: theme.colors.muted }]}>{heroAddress}</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={openVenueMap}
+                  disabled={!hasVenueLocation}
+                  style={[
+                    styles.mapButton,
+                    {
+                      borderColor: `${theme.colors.primary}33`,
+                      backgroundColor: hasVenueLocation ? `${theme.colors.primary}14` : `${theme.colors.background}66`,
+                    },
+                    !hasVenueLocation && styles.mapButtonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Apri posizione sulla mappa"
+                >
+                  <Text style={[styles.mapButtonText, { color: hasVenueLocation ? theme.colors.primary : theme.colors.muted }]}>Mappa</Text>
+                  <Feather name="arrow-up-right" size={14} color={hasVenueLocation ? theme.colors.primary : theme.colors.muted} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.highlightCard,
+              {
+                backgroundColor: theme.colors.card,
+                borderColor: `${theme.colors.primary}40`,
+                shadowColor: theme.colors.primary,
+              },
+            ]}
+          >
+            <View style={[styles.highlightOrb, { backgroundColor: `${theme.colors.primary}22` }]} />
+            <View style={styles.highlightContent}>
+              <View style={[styles.highlightIconWrap, { backgroundColor: `${theme.colors.primary}18`, borderColor: `${theme.colors.primary}44` }]}>
+                <Feather name="zap" size={22} color={theme.colors.primary} />
+              </View>
+              <View style={styles.highlightTextWrap}>
+                <Text style={[styles.highlightTitle, { color: theme.colors.text }]}>{highlightTitle}</Text>
+                <Text style={[styles.highlightDescription, { color: theme.colors.muted }]}>{highlightDescription}</Text>
+              </View>
+            </View>
+          </View>
 
           {display.description ? (
-            <>
-              <View style={{ height: 10 }} />
-              <Text style={[styles.desc, { color: theme.colors.muted }]}>{display.description}</Text>
-            </>
+            <View style={[styles.copyCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <Text style={[styles.sectionEyebrow, { color: theme.colors.primary }]}>Atmosfera</Text>
+              <Text style={[styles.copyText, { color: theme.colors.muted }]}>{display.description}</Text>
+            </View>
           ) : null}
 
-          <View style={{ height: 16 }} />
-          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Accesso evento</Text>
-            <Text style={[styles.promoDetails, { color: theme.colors.muted }]}> 
-              {isPresaleEvent
-                ? `Prevendita online ${presalePrice > 0 ? `• ${presaleCurrency} ${presalePrice}` : ''}`
-                : 'Lista gratuita con QR'}
-            </Text>
-            {isPresaleEvent && presaleCapacity ? (
-              <Text style={[styles.promoDetails, { color: theme.colors.muted }]}>Disponibili: {Math.max(presaleCapacity - presaleSold, 0)} / {presaleCapacity}</Text>
+          <View style={[styles.sectionCardLarge, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}> 
+            <Text style={[styles.sectionHeading, { color: theme.colors.text }]}>Accesso evento</Text>
+            <Text style={[styles.sectionBody, { color: theme.colors.muted }]}>{accessIntro}</Text>
+            {availablePresale !== null ? (
+              <View style={[styles.infoStrip, { backgroundColor: `${theme.colors.background}D9`, borderColor: `${theme.colors.border}80` }]}>
+                <Text style={[styles.infoStripText, { color: theme.colors.text }]}>Disponibili ora: {availablePresale} / {presaleCapacity}</Text>
+              </View>
             ) : null}
           </View>
 
-          <View style={{ height: 12 }} />
-          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Prezzi ingresso</Text>
+          <View style={[styles.sectionCardLarge, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}> 
+            <View style={styles.sectionHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.sectionHeading, { color: theme.colors.text }]}>{optionSectionTitle}</Text>
+                <Text style={[styles.sectionBody, { color: theme.colors.muted }]}>{optionSectionDescription}</Text>
+              </View>
+            </View>
 
-            {(display.entry_prices?.length ?? 0) > 0 ? (
+            {isPresaleEvent && (display.entry_prices?.length ?? 0) > 0 ? (
               <>
-              <View style={styles.filterRow}>
-                {(['ALL', 'M', 'F', 'ALTRO'] as const).map((g) => {
-                  const active = selectedGender === g;
+                <View style={styles.filterRow}>
+                  {(['ALL', 'M', 'F', 'ALTRO'] as const).map((g) => {
+                    const active = selectedGender === g;
+                    return (
+                      <TouchableOpacity
+                        key={g}
+                        onPress={() => setSelectedGender(g)}
+                        style={[
+                          styles.filterPill,
+                          { borderColor: `${theme.colors.border}CC`, backgroundColor: `${theme.colors.background}B3` },
+                          active && { borderColor: theme.colors.primary, backgroundColor: `${theme.colors.primary}14` },
+                        ]}
+                      >
+                        <Text style={[styles.filterText, { color: active ? theme.colors.primary : theme.colors.muted }]}>
+                          {g === 'ALL' ? 'Tutti' : g}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                  <TouchableOpacity
+                    onPress={() => setPreviewTime((t) => (t ? null : display.raw?.start_time ?? null))}
+                    style={[styles.filterPill, { marginLeft: 'auto', borderColor: `${theme.colors.border}CC`, backgroundColor: `${theme.colors.background}B3` }]}
+                  >
+                    <Text style={[styles.filterText, { color: theme.colors.muted }]}>
+                      {previewTime ? `Ora ${previewTime}` : 'Anteprima oraria'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {display.entry_prices.map((r) => {
+                  const ok = isApplicable(r);
+                  const time = r.start_time || r.end_time ? `${r.start_time ?? '--:--'} - ${r.end_time ?? '--:--'}` : 'Valido sempre';
+                  const gender = r.gender ? ` • ${r.gender}` : '';
+                  const label = r.label ? `${r.label}` : 'Ingresso standard';
+
                   return (
-                    <TouchableOpacity
-                      key={g}
-                      onPress={() => setSelectedGender(g)}
-                      style={[styles.filterPill, { borderColor: theme.colors.border }, active && { borderColor: theme.colors.primary, backgroundColor: theme.colors.background }]}
+                    <View
+                      key={r.id}
+                      style={[
+                        styles.accessOption,
+                        {
+                          borderColor: ok ? theme.colors.primary : `${theme.colors.border}CC`,
+                          backgroundColor: ok ? `${theme.colors.primary}10` : `${theme.colors.background}B3`,
+                        },
+                      ]}
                     >
-                      <Text style={[styles.filterText, { color: active ? theme.colors.primary : theme.colors.muted }]}>
-                        {g === 'ALL' ? 'Tutti' : g}
-                      </Text>
-                    </TouchableOpacity>
+                      <View style={styles.accessOptionLeft}>
+                        <View style={[styles.accessRadioOuter, { borderColor: ok ? theme.colors.primary : theme.colors.muted }]}> 
+                          {ok ? <View style={[styles.accessRadioInner, { backgroundColor: theme.colors.primary }]} /> : null}
+                        </View>
+                        <View style={styles.accessTextWrap}>
+                          <Text style={[styles.accessTitle, { color: theme.colors.text }]}>{label}</Text>
+                          <Text style={[styles.accessMeta, { color: theme.colors.muted }]}>{time}{gender}</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.accessOptionRight}>
+                        {ok && previewTime ? (
+                          <View style={[styles.recommendedPill, { backgroundColor: `${theme.colors.primary}18`, borderColor: `${theme.colors.primary}44` }]}>
+                            <Text style={[styles.recommendedText, { color: theme.colors.primary }]}>Valido per l'orario scelto</Text>
+                          </View>
+                        ) : null}
+                        <Text style={[styles.accessPrice, { color: ok ? theme.colors.primary : theme.colors.text }]}>€ {r.price}</Text>
+                      </View>
+                    </View>
                   );
                 })}
+              </>
+            ) : !isPresaleEvent && (display.entry_prices?.length ?? 0) > 0 ? (
+              <>
+                {display.entry_prices.map((r) => {
+                  const time = r.start_time || r.end_time ? `${r.start_time ?? '--:--'} - ${r.end_time ?? '--:--'}` : 'Valida per tutta la serata';
+                  const gender = r.gender ? ` • ${r.gender}` : '';
+                  const label = r.label ? `${r.label}` : 'Ingresso in lista';
+                  const priceLabel = Number(r.price) > 0 ? `€ ${r.price}` : 'Gratis';
 
-                <TouchableOpacity
-                  onPress={() => setPreviewTime((t) => (t ? null : display.raw?.start_time ?? null))}
-                  style={[styles.filterPill, { marginLeft: 'auto', borderColor: theme.colors.border }]}
-                >
-                  <Text style={[styles.filterText, { color: theme.colors.muted }]}>
-                    {previewTime ? `Ora: ${previewTime}` : 'Mostra per ora'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                  return (
+                    <View
+                      key={r.id}
+                      style={[
+                        styles.accessOption,
+                        {
+                          borderColor: `${theme.colors.border}CC`,
+                          backgroundColor: `${theme.colors.background}B3`,
+                        },
+                      ]}
+                    >
+                      <View style={styles.accessOptionLeft}>
+                        <View style={[styles.accessInfoDot, { backgroundColor: `${theme.colors.primary}14`, borderColor: `${theme.colors.primary}33` }]}>
+                          <Feather name="check" size={14} color={theme.colors.primary} />
+                        </View>
+                        <View style={styles.accessTextWrap}>
+                          <Text style={[styles.accessTitle, { color: theme.colors.text }]}>{label}</Text>
+                          <Text style={[styles.accessMeta, { color: theme.colors.muted }]}>{time}{gender}</Text>
+                        </View>
+                      </View>
 
-              {display.entry_prices.map((r) => {
-                const ok = isApplicable(r);
-                const time = r.start_time || r.end_time ? `${r.start_time ?? '--:--'} - ${r.end_time ?? '--:--'}` : 'Sempre';
-                const gender = r.gender ? ` • ${r.gender}` : '';
-                const label = r.label ? `${r.label}` : 'Ingresso';
-                return (
-                  <View
-                    key={r.id}
-                    style={[styles.priceRow, { borderColor: ok ? theme.colors.primary : theme.colors.border }]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.priceTitle, { color: theme.colors.text }]}>{label}</Text>
-                      <Text style={[styles.priceMeta, { color: theme.colors.muted }]}>{time}{gender}</Text>
+                      <Text style={[styles.accessPrice, { color: theme.colors.text }]}>{priceLabel}</Text>
                     </View>
-                    <Text style={[styles.priceValue, { color: ok ? theme.colors.primary : theme.colors.text }]}>€ {r.price}</Text>
-                  </View>
-                );
-              })}
+                  );
+                })}
               </>
             ) : (
-              <Text style={[styles.promoDetails, { color: theme.colors.muted }]}>Prezzi non disponibili.</Text>
+              <View style={[styles.accessOption, { borderColor: `${theme.colors.border}CC`, backgroundColor: `${theme.colors.background}B3` }]}>
+                <View style={styles.accessOptionLeft}>
+                  <View style={[styles.accessInfoDot, { backgroundColor: `${theme.colors.primary}14`, borderColor: `${theme.colors.primary}33` }]}>
+                    <Feather name="check" size={14} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.accessTextWrap}>
+                    <Text style={[styles.accessTitle, { color: theme.colors.text }]}>{isPresaleEvent ? 'Ticket standard' : 'Lista NightHub con QR'}</Text>
+                    <Text style={[styles.accessMeta, { color: theme.colors.muted }]}>{isPresaleEvent ? 'Ingresso garantito con pagamento online' : 'Prenotazione gratuita, conferma immediata e QR pronto da mostrare all’ingresso'}</Text>
+                  </View>
+                </View>
+                <Text style={[styles.accessPrice, { color: theme.colors.primary }]}>{isPresaleEvent ? `${presaleCurrency} ${presalePrice.toFixed(2)}` : 'Gratis'}</Text>
+              </View>
             )}
           </View>
 
-          <View style={{ height: 12 }} />
-          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
-            <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Offerte per questo evento</Text>
+          {display.promos && display.promos.length > 0 ? (
+            <View style={[styles.sectionCardLarge, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}> 
+              <Text style={[styles.sectionHeading, { color: theme.colors.text }]}>Promozioni</Text>
 
-            {display.promos && display.promos.length ? (
-              display.promos.map((p: any) => (
-                <View key={p.id} style={[styles.promoRow, { borderColor: theme.colors.border }]}>
-                  <View style={{ flex: 1 }}>
+              {display.promos.map((p: any) => (
+                <View key={p.id} style={[styles.promoRow, { borderColor: `${theme.colors.border}CC`, backgroundColor: `${theme.colors.background}B3` }]}>
+                  <View style={[styles.promoIconWrap, { backgroundColor: `${theme.colors.primary}14`, borderColor: `${theme.colors.primary}33` }]}>
+                    <Feather name="gift" size={18} color={theme.colors.primary} />
+                  </View>
+                  <View style={styles.promoTextWrap}>
                     <Text style={[styles.promoTitle, { color: theme.colors.text }]}>{p.title}</Text>
-                    <Text style={[styles.promoDetails, { color: theme.colors.muted }]}> 
+                    <Text style={[styles.promoDetails, { color: theme.colors.muted }]}>
                       {p.description ?? p.details ?? ''}
                       {p.discount_type ? ` • ${p.discount_type}` : ''}
                       {typeof p.discount_value === 'number' ? ` ${p.discount_type === 'percentage' ? `${p.discount_value}%` : `€${p.discount_value}`}` : ''}
                     </Text>
                   </View>
                 </View>
-              ))
-            ) : (
-              <Text style={[styles.promoDetails, { color: theme.colors.muted }]}>Nessuna promozione disponibile per questo evento.</Text>
-            )}
-          </View>
+              ))}
+            </View>
+          ) : null}
         </View>
       </ScrollView>
 
-      <View
-        style={[
-          styles.footer,
-          {
-            backgroundColor: theme.colors.background,
-            borderTopColor: theme.colors.border,
-            paddingBottom: Math.max(insets.bottom, 10),
-          },
-        ]}
-      >
-        {isPresaleEvent ? (
-          <>
-            <View style={styles.qtyRow}>
-              <Text style={[styles.qtyLabel, { color: theme.colors.muted }]}>Quantità ticket</Text>
-              <View style={[styles.qtyControls, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
-                <TouchableOpacity
-                  onPress={() => setPresaleQuantity((q) => Math.max(1, q - 1))}
-                  style={styles.qtyBtn}
-                >
-                  <Feather name="minus" size={16} color={theme.colors.text} />
-                </TouchableOpacity>
-                <Text style={[styles.qtyValue, { color: theme.colors.text }]}>{presaleQuantity}</Text>
-                <TouchableOpacity
-                  onPress={() => setPresaleQuantity((q) => Math.min(10, q + 1))}
-                  style={styles.qtyBtn}
-                >
-                  <Feather name="plus" size={16} color={theme.colors.text} />
-                </TouchableOpacity>
+      {!bookingOpen ? (
+        <View
+          style={[
+            styles.footer,
+            {
+              backgroundColor: `${theme.colors.background}F2`,
+              borderTopColor: `${theme.colors.border}B3`,
+              paddingBottom: Math.max(insets.bottom, 12),
+            },
+          ]}
+        >
+          {isPresaleEvent ? (
+            <>
+              <View style={styles.qtyRow}>
+                <Text style={[styles.qtyLabel, { color: theme.colors.muted }]}>Quantità ticket</Text>
+                <View style={[styles.qtyControls, { borderColor: `${theme.colors.border}CC`, backgroundColor: `${theme.colors.card}F2` }]}> 
+                  <TouchableOpacity
+                    onPress={() => setPresaleQuantity((q) => Math.max(1, q - 1))}
+                    style={styles.qtyBtn}
+                  >
+                    <Feather name="minus" size={16} color={theme.colors.text} />
+                  </TouchableOpacity>
+                  <Text style={[styles.qtyValue, { color: theme.colors.text }]}>{presaleQuantity}</Text>
+                  <TouchableOpacity
+                    onPress={() => setPresaleQuantity((q) => Math.min(10, q + 1))}
+                    style={styles.qtyBtn}
+                  >
+                    <Feather name="plus" size={16} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
 
-            <View style={[styles.paymentInfoCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}> 
-              <View style={styles.paymentInfoRow}>
-                <Text style={[styles.paymentInfoLabel, { color: theme.colors.muted }]}>Prezzo biglietto</Text>
-                <Text style={[styles.paymentInfoValue, { color: theme.colors.text }]}>{presaleCurrency} {ticketPriceTotal}</Text>
+              <View style={[styles.paymentInfoCard, { borderColor: `${theme.colors.border}CC`, backgroundColor: `${theme.colors.card}F2` }]}> 
+                <View style={styles.paymentInfoRow}>
+                  <Text style={[styles.paymentInfoLabel, { color: theme.colors.muted }]}>Biglietti</Text>
+                  <Text style={[styles.paymentInfoValue, { color: theme.colors.text }]}>{presaleCurrency} {ticketPriceTotal}</Text>
+                </View>
+                <View style={styles.paymentInfoRow}>
+                  <Text style={[styles.paymentInfoLabel, { color: theme.colors.muted }]}>Commissione servizio</Text>
+                  <Text style={[styles.paymentInfoValue, { color: theme.colors.text }]}>{presaleCurrency} {serviceFeeTotal}</Text>
+                </View>
+                <View style={styles.paymentInfoRow}>
+                  <Text style={[styles.paymentInfoTotal, { color: theme.colors.text }]}>Totale</Text>
+                  <Text style={[styles.paymentInfoTotal, { color: theme.colors.text }]}>{presaleCurrency} {totalAmount}</Text>
+                </View>
               </View>
-              <View style={styles.paymentInfoRow}>
-                <Text style={[styles.paymentInfoLabel, { color: theme.colors.muted }]}>Commissione servizio</Text>
-                <Text style={[styles.paymentInfoValue, { color: theme.colors.text }]}>{presaleCurrency} {serviceFeeTotal}</Text>
-              </View>
-              <View style={styles.paymentInfoRow}>
-                <Text style={[styles.paymentInfoTotal, { color: theme.colors.text }]}>Totale finale</Text>
-                <Text style={[styles.paymentInfoTotal, { color: theme.colors.text }]}>{presaleCurrency} {totalAmount}</Text>
-              </View>
-              <View style={styles.paymentInfoRow}>
-                <Feather name="credit-card" size={15} color={theme.colors.primary} />
-                <Text style={[styles.paymentInfoHint, { color: theme.colors.muted }]}>Pagamento sicuro con carta</Text>
-              </View>
-            </View>
+            </>
+          ) : null}
 
-            <PrimaryButton
-              title={`Paga con carta • ${presaleCurrency} ${totalAmount}`}
-              onPress={buyPresale}
-              isLoading={isBuyingPresale}
-              disabled={isBuyingPresale}
-            />
-          </>
-        ) : (
-          <PrimaryButton
-            title="Riserva il tuo ingresso"
-            onPress={reserveEntry}
-            isLoading={isReservingEntry}
-            disabled={isReservingEntry}
-          />
-        )}
+          <View style={styles.footerActions}>
+            <TouchableOpacity
+              style={[styles.tableButton, { borderColor: `${theme.colors.border}CC`, backgroundColor: `${theme.colors.card}F2` }]}
+              onPress={() => setBookingOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Richiedi tavolo"
+            >
+              <Feather name="calendar" size={20} color={theme.colors.muted} />
+              <Text style={[styles.tableButtonText, { color: theme.colors.muted }]}>Tavolo</Text>
+            </TouchableOpacity>
 
-        <View style={styles.secondaryActions}>
-          <TouchableOpacity
-            style={[styles.secondaryBtn, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}
-            onPress={() => setBookingOpen(true)}
-          >
-            <Feather name="calendar" size={16} color={theme.colors.primary} />
-            <Text style={[styles.secondaryText, { color: theme.colors.text }]}>Richiedi tavolo</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.iconBtn, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}
-            onPress={shareStoryCard}
-            disabled={isSharingStory}
-            accessibilityLabel="Condividi evento"
-            accessibilityRole="button"
-          >
-            <Feather name={isSharingStory ? "loader" : "share-2"} size={18} color={theme.colors.primary} />
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.primaryCta,
+                { backgroundColor: theme.colors.primary, borderColor: `${theme.colors.primary}88` },
+                (isPresaleEvent ? isBuyingPresale : isReservingEntry) && styles.primaryCtaDisabled,
+              ]}
+              onPress={isPresaleEvent ? buyPresale : reserveEntry}
+              disabled={isPresaleEvent ? isBuyingPresale : isReservingEntry}
+              accessibilityRole="button"
+              accessibilityLabel={isPresaleEvent ? `Paga con carta ${presaleCurrency} ${totalAmount}` : 'Riserva il tuo ingresso'}
+            >
+              {(isPresaleEvent ? isBuyingPresale : isReservingEntry) ? (
+                <ActivityIndicator size="small" color={theme.colors.text} />
+              ) : (
+                isPresaleEvent ? (
+                  <Feather name="credit-card" size={20} color={theme.colors.text} />
+                ) : (
+                  <MaterialCommunityIcons name="qrcode-scan" size={20} color={theme.colors.text} />
+                )
+              )}
+              <Text style={[styles.primaryCtaText, { color: theme.colors.text }]}>
+                {isPresaleEvent ? `Paga • ${presaleCurrency} ${totalAmount}` : 'Riserva il tuo ingresso'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      ) : null}
 
       <View style={styles.storyRenderRoot} pointerEvents="none">
         <View
@@ -622,43 +933,355 @@ export default function EventDetailScreen({ route, navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  topImageWrap: { position: 'relative' },
-  image: { width: "100%" },
-  back: { position: 'absolute', left: 12, top: 12, padding: 8, borderRadius: 10 },
-  inner: { padding: 18 },
-  title: { fontSize: 20, fontWeight: "800", marginBottom: 6 },
-  meta: { fontSize: 13, marginBottom: 6 },
-  location: { fontSize: 13 },
-  sectionCard: { borderWidth: 1, borderRadius: 14, padding: 12 },
-  sectionTitle: { fontSize: 16, fontWeight: "800", marginBottom: 8 },
-  desc: { lineHeight: 20 },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
-  filterPill: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
-  filterText: { fontSize: 12, fontWeight: '800' },
-  priceRow: { flexDirection: 'row', alignItems: 'center', padding: 12, borderWidth: 1, borderRadius: 12, marginBottom: 10 },
-  priceTitle: { fontSize: 14, fontWeight: '900', marginBottom: 4 },
-  priceMeta: { fontSize: 12 },
-  priceValue: { fontSize: 14, fontWeight: '900' },
-  promoRow: { flexDirection: 'row', alignItems: 'center', padding: 12, borderWidth: 1, borderRadius: 12, marginBottom: 10 },
-  promoTitle: { fontSize: 14, fontWeight: '800', marginBottom: 4 },
-  promoDetails: { fontSize: 13 },
-  useBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
-  useText: { fontWeight: '700' },
-  footer: {
-    borderTopWidth: 1,
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    gap: 8,
+  heroWrap: { position: 'absolute', top: 0, left: 0, right: 0 },
+  heroImage: { width: '100%' },
+  heroShadeTop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.14)',
   },
-  secondaryActions: {
+  heroShadeBottom: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.44,
+  },
+  heroAccent: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    opacity: 0.04,
+  },
+  floatingHeader: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    zIndex: 30,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  glassIconButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(10,10,14,0.38)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  contentWrap: {
+    paddingHorizontal: 20,
+    gap: 14,
+    marginTop: -36,
+  },
+  heroCard: {
+    borderWidth: 1,
+    borderRadius: 28,
+    padding: 20,
+    gap: 16,
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 10,
+  },
+  heroBadgeRow: {
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
+  },
+  heroBadgePrimary: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  heroBadgePrimaryText: {
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+  },
+  heroBadgeGhost: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  heroBadgeGhostText: {
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+  },
+  heroTitle: {
+    fontSize: 34,
+    lineHeight: 38,
+    fontWeight: '900',
+    letterSpacing: -1,
+  },
+  metaCard: {
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 16,
+    gap: 14,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  metaIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metaTextWrap: { flex: 1 },
+  mapButton: {
+    marginLeft: 8,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  mapButtonDisabled: {
+    opacity: 0.55,
+  },
+  mapButtonText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  metaTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  metaSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  metaDivider: {
+    height: 1,
+    borderRadius: 999,
+  },
+  highlightCard: {
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 18,
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  highlightOrb: {
+    position: 'absolute',
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    right: -45,
+    top: -40,
+  },
+  highlightContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  highlightIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  highlightTextWrap: { flex: 1, gap: 4 },
+  highlightTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  highlightDescription: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '500',
+  },
+  copyCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 18,
+    gap: 8,
+  },
+  sectionEyebrow: {
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1.3,
+  },
+  copyText: {
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  sectionCardLarge: {
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 18,
+    gap: 14,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  sectionHeading: {
+    fontSize: 20,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  sectionBody: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  infoStrip: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  infoStripText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  filterPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  filterText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  accessOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+  },
+  accessOptionLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  accessRadioOuter: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accessRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  accessInfoDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accessTextWrap: { flex: 1, gap: 3 },
+  accessTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  accessMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  accessOptionRight: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  recommendedPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  recommendedText: {
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  accessPrice: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  promoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderRadius: 18,
+  },
+  promoIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promoTextWrap: { flex: 1, gap: 4 },
+  promoTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  promoDetails: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  emptyPromoCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+  },
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    gap: 10,
   },
   qtyRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
   },
   qtyLabel: {
     fontSize: 13,
@@ -666,15 +1289,15 @@ const styles = StyleSheet.create({
   },
   qtyControls: {
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    gap: 6,
+    gap: 8,
   },
   qtyBtn: {
-    width: 30,
-    height: 30,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -686,17 +1309,16 @@ const styles = StyleSheet.create({
   },
   paymentInfoCard: {
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 6,
-    marginBottom: 4,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
   },
   paymentInfoRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    alignItems: 'center',
+    gap: 10,
   },
   paymentInfoLabel: {
     fontSize: 12,
@@ -707,34 +1329,50 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   paymentInfoTotal: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '900',
   },
-  paymentInfoHint: {
-    fontSize: 12,
-    fontWeight: '700',
-    flex: 1,
+  footerActions: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
   },
-  secondaryBtn: {
-    flex: 1,
+  tableButton: {
+    width: 72,
+    height: 60,
+    borderRadius: 20,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  tableButtonText: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  primaryCta: {
+    flex: 1,
+    height: 60,
+    borderRadius: 20,
+    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
   },
-  secondaryText: {
-    fontSize: 14,
-    fontWeight: '700',
+  primaryCtaDisabled: {
+    opacity: 0.72,
   },
-  iconBtn: {
-    width: 48,
-    borderWidth: 1,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+  primaryCtaText: {
+    fontSize: 17,
+    fontWeight: '800',
   },
   storyRenderRoot: {
     position: 'absolute',

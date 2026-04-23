@@ -307,15 +307,43 @@ export default function VenueTablesScreen({ venueId }: Props) {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}> 
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.title, { color: theme.colors.text }]}>Zone del locale</Text>
-          <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Totale zone: {totals.count} • Con prezzo: {totals.configuredPrice} • Con minimo: {totals.configuredMinimum}</Text>
+      <View style={[styles.heroCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.eyebrow, { color: theme.colors.muted }]}>Listino base</Text>
+            <Text style={[styles.title, { color: theme.colors.text }]}>Zone del locale</Text>
+            <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Configura i valori di default per pricing, minimo spesa e capienza. Ogni evento puo poi applicare override dedicati.</Text>
+          </View>
+
+          <TouchableOpacity onPress={onRefresh} style={[styles.iconBtn, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}> 
+            <Feather name={refreshing || loading ? "loader" : "refresh-cw"} size={18} color={theme.colors.text} />
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity onPress={onRefresh} style={styles.iconBtn}>
-          <Feather name={refreshing || loading ? "loader" : "refresh-cw"} size={18} color={theme.colors.text} />
-        </TouchableOpacity>
+        <View style={styles.summaryGrid}>
+          <View style={[styles.summaryCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.summaryLabel, { color: theme.colors.muted }]}>Zone</Text>
+            <Text style={[styles.summaryValue, { color: theme.colors.text }]}>{totals.count}</Text>
+          </View>
+          <View style={[styles.summaryCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.summaryLabel, { color: '#8B7BFF' }]}>Con prezzo</Text>
+            <Text style={[styles.summaryValue, { color: theme.colors.text }]}>{totals.configuredPrice}</Text>
+          </View>
+          <View style={[styles.summaryCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+            <Text style={[styles.summaryLabel, { color: '#F4C95D' }]}>Con minimo</Text>
+            <Text style={[styles.summaryValue, { color: theme.colors.text }]}>{totals.configuredMinimum}</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={[styles.noteCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+        <View style={[styles.noteIconWrap, { backgroundColor: 'rgba(139,123,255,0.14)', borderColor: 'rgba(139,123,255,0.22)' }]}>
+          <Feather name="sliders" size={14} color="#8B7BFF" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.noteTitle, { color: theme.colors.text }]}>Questo e il listino standard del locale</Text>
+          <Text style={[styles.noteText, { color: theme.colors.muted }]}>Usalo come base stabile. Se una serata ha privè o tavoli a prezzo diverso, imposta l’override dentro la schermata di creazione o modifica evento.</Text>
+        </View>
       </View>
 
       {error ? (
@@ -367,14 +395,15 @@ export default function VenueTablesScreen({ venueId }: Props) {
           </View>
 
           {zones.map((z) => (
-            <View key={z.label.toLowerCase()} style={styles.zoneCard}>
+            <View key={z.label.toLowerCase()} style={[styles.zoneCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
               <View style={styles.zoneHeader}>
                 <View style={{ flex: 1 }}>
-                  <View style={styles.zoneTitleRow}>
-                    <Feather name="map-pin" size={14} color="#a78bfa" />
-                    <Text style={styles.zoneTitle}>{z.label}</Text>
+                  <View style={[styles.zoneBadge, { backgroundColor: 'rgba(139,123,255,0.14)', borderColor: 'rgba(139,123,255,0.24)' }]}>
+                    <Feather name="map-pin" size={12} color="#8B7BFF" />
+                    <Text style={styles.zoneBadgeText}>Base locale</Text>
                   </View>
-                  <Text style={styles.zoneMeta}>Per testa: {formatMoney(z.per_testa)} • Minimo: {formatMoney(z.costo_minimo)} • Max: {z.persone_max ?? "—"}</Text>
+                  <Text style={[styles.zoneTitle, { color: theme.colors.text }]}>{z.label}</Text>
+                  <Text style={[styles.zoneMeta, { color: theme.colors.muted }]}>Per testa: {formatMoney(z.per_testa)} • Minimo: {formatMoney(z.costo_minimo)} • Max: {z.persone_max ?? "—"}</Text>
                   {z.sourceIds.length > 1 ? (
                     <Text style={styles.zoneWarning}>Sono presenti {z.sourceIds.length} record unificati per questa zona.</Text>
                   ) : null}
@@ -513,11 +542,40 @@ function Field({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  title: { fontSize: 24, fontWeight: "900" },
-  subtitle: { fontSize: 12, fontWeight: "700" },
-  iconBtn: { padding: 10, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.08)" },
+  container: { flex: 1, padding: 20, gap: 12 },
+  heroCard: {
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 18,
+    gap: 16,
+  },
+  header: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  eyebrow: { fontSize: 11, fontWeight: '800', letterSpacing: 1.4, textTransform: 'uppercase' },
+  title: { fontSize: 28, fontWeight: "900", letterSpacing: -0.5 },
+  subtitle: { fontSize: 13, fontWeight: "600", lineHeight: 18, marginTop: 4 },
+  iconBtn: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  summaryGrid: { flexDirection: 'row', gap: 10 },
+  summaryCard: { flex: 1, borderWidth: 1, borderRadius: 18, padding: 14, gap: 6 },
+  summaryLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
+  summaryValue: { fontSize: 22, fontWeight: '900', letterSpacing: -0.4 },
+  noteCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  noteIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noteTitle: { fontSize: 13, fontWeight: '900', marginBottom: 4 },
+  noteText: { fontSize: 12, fontWeight: '700', lineHeight: 18 },
 
   banner: {
     flexDirection: "row",
@@ -563,17 +621,26 @@ const styles = StyleSheet.create({
   secondaryBtnText: { color: "#fff", fontSize: 14, fontWeight: "900" },
 
   zoneCard: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 22,
+    padding: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
     marginBottom: 12,
   },
   zoneHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
-  zoneTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  zoneTitle: { color: "#fff", fontSize: 15, fontWeight: "900" },
-  zoneMeta: { color: "#d1d5db", fontSize: 12, fontWeight: "700", marginTop: 6 },
+  zoneBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  zoneBadgeText: { color: '#8B7BFF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },
+  zoneTitle: { fontSize: 18, fontWeight: "900", letterSpacing: -0.3 },
+  zoneMeta: { fontSize: 12, fontWeight: "700", marginTop: 6 },
   zoneWarning: { color: "#fbbf24", fontSize: 11, fontWeight: "700", marginTop: 6 },
 
   rowButtons: { flexDirection: "row", gap: 8 },

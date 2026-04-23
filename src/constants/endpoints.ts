@@ -36,6 +36,20 @@ export const API_ENDPOINTS = {
     DELETE: (id: string) => `/venues/${id}`,
     EVENTS: (id: string) => `/venues/${id}/events`,
     STATS: (id: string) => `/venues/${id}/stats`,
+    ANALYTICS: (id: string) => `/venues/${id}/analytics`,
+    PRICING: (id: string) => `/venues/${id}/pricing`,
+    USERS: (id: string) => `/venues/${id}/users`,
+    PR_NETWORK: (id: string) => `/venues/${id}/pr-network`,
+    PR_NETWORK_ME: (id: string) => `/venues/${id}/pr-network/me`,
+    PR_NETWORK_MY_VENUES: '/venues/pr-network/me',
+    PR_NETWORK_MEMBER: (id: string, memberId: string) =>
+      `/venues/${id}/pr-network/${memberId}`,
+    PR_EVENT_ASSIGNMENTS: (id: string, eventId: string) =>
+      `/venues/${id}/pr-events/${eventId}/assignments`,
+    PR_EVENT_ASSIGN: (id: string) => `/venues/${id}/pr-events/assignments`,
+    PR_SCANS: (id: string) => `/venues/${id}/pr-scans`,
+    PR_SCAN_ENTRY: (id: string, scanId: string) => `/venues/${id}/pr-scans/${scanId}/entry`,
+    PR_DASHBOARD: (id: string) => `/venues/${id}/pr-dashboard`,
     TABLES: (id: string) => `/venues/${id}/tables`,
     STRIPE_CONNECT_ONBOARDING: (id: string) =>
       `/venues/${id}/stripe/connect/onboarding`,

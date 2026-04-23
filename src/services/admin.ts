@@ -14,6 +14,45 @@ import {
   UpdateVenueContractPayload,
 } from "../types/admin";
 
+type FetchOptions = {
+  force?: boolean;
+};
+
+type CacheEntry<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+const CACHE_TTL_MS = 60_000;
+const adminCache: {
+  dashboard: CacheEntry<AdminDashboardData> | null;
+  venues: CacheEntry<AdminVenue[]> | null;
+  users: CacheEntry<AdminUser[]> | null;
+} = {
+  dashboard: null,
+  venues: null,
+  users: null,
+};
+
+function readCache<T>(entry: CacheEntry<T> | null): T | null {
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) return null;
+  return entry.value;
+}
+
+function writeCache<T>(value: T): CacheEntry<T> {
+  return {
+    value,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  };
+}
+
+function invalidateAdminCache() {
+  adminCache.dashboard = null;
+  adminCache.venues = null;
+  adminCache.users = null;
+}
+
 const safeNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -88,12 +127,17 @@ const normalizeExpiringContracts = (input: unknown) => {
     .filter((row) => row.venueId && row.expiresAt);
 };
 
-export async function fetchAdminDashboard(): Promise<AdminDashboardData> {
+export async function fetchAdminDashboard(options: FetchOptions = {}): Promise<AdminDashboardData> {
+  if (!options.force) {
+    const cached = readCache(adminCache.dashboard);
+    if (cached) return cached;
+  }
+
   const { data } = await api.get(API_ENDPOINTS.ADMIN.DASHBOARD);
 
   const rawMetrics = data?.metrics ?? {};
 
-  return {
+  const normalized = {
     metrics: {
       ...defaultMetrics,
       totalVenues: safeNumber(rawMetrics.totalVenues),
@@ -122,13 +166,24 @@ export async function fetchAdminDashboard(): Promise<AdminDashboardData> {
     },
     expiringContracts: normalizeExpiringContracts(data?.expiringContracts),
   };
+
+  adminCache.dashboard = writeCache(normalized);
+  return normalized;
 }
 
-export async function fetchAdminVenues(): Promise<AdminVenue[]> {
-  const { data } = await api.get(API_ENDPOINTS.ADMIN.VENUES);
-  if (!Array.isArray(data)) return [];
+export async function fetchAdminVenues(options: FetchOptions = {}): Promise<AdminVenue[]> {
+  if (!options.force) {
+    const cached = readCache(adminCache.venues);
+    if (cached) return cached;
+  }
 
-  return data.map((venue: any) => ({
+  const { data } = await api.get(API_ENDPOINTS.ADMIN.VENUES);
+  if (!Array.isArray(data)) {
+    adminCache.venues = writeCache([]);
+    return [];
+  }
+
+  const normalized = data.map((venue: any) => ({
     id: String(venue?.id ?? ""),
     name: String(venue?.name ?? "Locale"),
     city: String(venue?.city ?? "N/D"),
@@ -138,6 +193,7 @@ export async function fetchAdminVenues(): Promise<AdminVenue[]> {
     revenue: safeNumber(venue?.revenue),
     eventsActive: safeNumber(venue?.eventsActive),
     eventsCompletedMonth: safeNumber(venue?.eventsCompletedMonth),
+    analyzedPeopleMonth: safeNumber(venue?.analyzedPeopleMonth),
     contractExpiresAt: venue?.contractExpiresAt ? String(venue.contractExpiresAt) : null,
     contractDaysLeft:
       venue?.contractDaysLeft === null || venue?.contractDaysLeft === undefined
@@ -156,13 +212,24 @@ export async function fetchAdminVenues(): Promise<AdminVenue[]> {
     managerName: venue?.managerName ? String(venue.managerName) : null,
     managerEmail: venue?.managerEmail ? String(venue.managerEmail) : null,
   }));
+
+  adminCache.venues = writeCache(normalized);
+  return normalized;
 }
 
-export async function fetchAdminUsers(): Promise<AdminUser[]> {
-  const { data } = await api.get(API_ENDPOINTS.ADMIN.USERS);
-  if (!Array.isArray(data)) return [];
+export async function fetchAdminUsers(options: FetchOptions = {}): Promise<AdminUser[]> {
+  if (!options.force) {
+    const cached = readCache(adminCache.users);
+    if (cached) return cached;
+  }
 
-  return data.map((user: any) => ({
+  const { data } = await api.get(API_ENDPOINTS.ADMIN.USERS);
+  if (!Array.isArray(data)) {
+    adminCache.users = writeCache([]);
+    return [];
+  }
+
+  const normalized = data.map((user: any) => ({
     id: String(user?.id ?? ""),
     name: String(user?.name ?? "Utente"),
     email: user?.email ? String(user.email) : undefined,
@@ -176,10 +243,14 @@ export async function fetchAdminUsers(): Promise<AdminUser[]> {
     sessions30d: safeNumber(user?.sessions30d),
     avgStayMinutes30d: safeNumber(user?.avgStayMinutes30d),
   }));
+
+  adminCache.users = writeCache(normalized);
+  return normalized;
 }
 
 export async function createAdminVenue(payload: CreateAdminVenuePayload): Promise<void> {
   await api.post(API_ENDPOINTS.ADMIN.CREATE_VENUE, payload);
+  invalidateAdminCache();
 }
 
 export async function updateAdminVenueContract(
@@ -187,6 +258,7 @@ export async function updateAdminVenueContract(
   payload: UpdateVenueContractPayload,
 ): Promise<void> {
   await api.patch(API_ENDPOINTS.ADMIN.UPDATE_VENUE_CONTRACT(venueId), payload);
+  invalidateAdminCache();
 }
 
 export async function updateAdminUserAssignment(
@@ -194,6 +266,7 @@ export async function updateAdminUserAssignment(
   payload: UpdateUserAssignmentPayload,
 ): Promise<void> {
   await api.patch(API_ENDPOINTS.ADMIN.UPDATE_USER_ASSIGNMENT(userId), payload);
+  invalidateAdminCache();
 }
 
 export async function fetchAdminReports(): Promise<AdminReportsData> {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, type LinkingOptions } from "@react-navigation/native";
 import RootNavigator from "./src/navigation/RootNavigation";
 import { ThemeProvider } from "./src/theme/ThemeProvider";
 import { AuthProvider } from "./src/providers/AuthProvider";
@@ -7,6 +7,29 @@ import { navigationRef, flushNavigationQueue } from "./src/navigation/Navigation
 import LegalConsentModal from "./src/components/LegalConsentModal";
 import { getLegalAccepted, setLegalAccepted } from "./src/services/legal";
 import { StripeProvider } from "@stripe/stripe-react-native";
+
+const normalizeBaseUrl = (value: string | undefined | null): string | null => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/+$/, "");
+  return `https://${raw}`.replace(/\/+$/, "");
+};
+
+const shareBase =
+  normalizeBaseUrl(process.env.EXPO_PUBLIC_APP_SHARE_URL) ||
+  normalizeBaseUrl(process.env.EXPO_PUBLIC_APP_BASE_URL);
+
+const linking: LinkingOptions<any> = {
+  prefixes: [
+    "nighthub://",
+    ...(shareBase ? [shareBase] : []),
+  ],
+  config: {
+    screens: {
+      EventDetail: "event/:id",
+    },
+  },
+};
 
 export default function App() {
   const [legalVisible, setLegalVisible] = useState(false);
@@ -31,7 +54,7 @@ export default function App() {
           publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ''}
           urlScheme="nighthub"
         >
-          <NavigationContainer ref={navigationRef} onReady={flushNavigationQueue}>
+          <NavigationContainer ref={navigationRef} onReady={flushNavigationQueue} linking={linking}>
             <RootNavigator />
           </NavigationContainer>
         </StripeProvider>

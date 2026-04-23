@@ -27,6 +27,7 @@ export type AdminVenue = {
   revenue: number;
   eventsActive?: number;
   eventsCompletedMonth?: number;
+  analyzedPeopleMonth?: number;
   contractExpiresAt?: string | null;
   contractDaysLeft?: number | null;
   contractEstimated?: boolean;

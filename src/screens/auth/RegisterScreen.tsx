@@ -46,6 +46,16 @@ function formatDateYYYYMMDD(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function formatDateForDisplay(value: string): string {
+  if (!isValidIsoDate(value)) return value;
+  const date = new Date(`${value}T12:00:00`);
+  return new Intl.DateTimeFormat("it-IT", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
 function digitsOnly(value: string): string {
   return value.replace(/\D/g, "");
 }
@@ -176,178 +186,247 @@ export default function RegisterScreen({ navigation }: any) {
             showsVerticalScrollIndicator={false}
           >
               <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-                <Feather name="chevron-left" size={18} color={theme.colors.text} />
+                <View style={[styles.backIconWrap, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                  <Feather name="chevron-left" size={18} color={theme.colors.text} />
+                </View>
                 <Text style={[styles.backText, { color: theme.colors.text }]}>Login</Text>
               </TouchableOpacity>
 
-              <Text style={[styles.title, { color: theme.colors.text }]}>Crea account cliente</Text>
-              <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Compila pochi dati utili e inizi subito a usare l'app</Text>
+              <View style={styles.heroBlock}>
+                <Text style={[styles.title, { color: theme.colors.text }]}>Crea account cliente</Text>
+                <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Pochi campi e sei dentro</Text>
+              </View>
 
               <View style={[styles.form, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }] }>
+                <View style={styles.formHeader}>
+                  <Text style={[styles.formTitle, { color: theme.colors.text }]}>I tuoi dati</Text>
+                </View>
+
                 {error ? <Text style={[styles.error, { color: theme.colors.error }]}>{error}</Text> : null}
 
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Nome e cognome</Text>
-                <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  placeholder="Mario Rossi"
-                  placeholderTextColor={theme.colors.muted}
-                  style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                  returnKeyType="next"
-                  blurOnSubmit={false}
-                  onSubmitEditing={() => usernameRef.current?.focus()}
-                />
+                <View style={[styles.sectionCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                  <View style={styles.sectionHeader}>
+                    <View style={[styles.sectionIcon, { backgroundColor: `${theme.colors.primary}14` }]}>
+                      <Feather name="user" size={16} color={theme.colors.primary} />
+                    </View>
+                    <View style={styles.sectionHeaderTextBlock}>
+                      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Informazioni principali</Text>
+                    </View>
+                  </View>
 
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Username</Text>
-                <TextInput
-                  ref={usernameRef}
-                  value={username}
-                  onChangeText={setUsername}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="mariorossi"
-                  placeholderTextColor={theme.colors.muted}
-                  style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                  returnKeyType="next"
-                  blurOnSubmit={false}
-                  onSubmitEditing={() => emailRef.current?.focus()}
-                />
-
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Email</Text>
-                <TextInput
-                  ref={emailRef}
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  placeholder="nome@esempio.com"
-                  placeholderTextColor={theme.colors.muted}
-                  style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                  returnKeyType="next"
-                  blurOnSubmit={false}
-                  onSubmitEditing={() => phoneRef.current?.focus()}
-                />
-
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Telefono (opzionale)</Text>
-                <View style={styles.phoneRow}>
-                  <View
-                    style={[
-                      styles.phonePrefix,
-                      {
-                        backgroundColor: theme.colors.card,
-                        borderColor: theme.colors.border,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.phonePrefixText, { color: theme.colors.text }]}>+39</Text>
+                  <View style={styles.labelRow}>
+                    <Feather name="type" size={14} color={theme.colors.muted} />
+                    <Text style={[styles.label, { color: theme.colors.muted }]}>Nome e cognome</Text>
                   </View>
                   <TextInput
-                    ref={phoneRef}
-                    value={phone}
-                    onChangeText={(text) => setPhone(digitsOnly(text))}
-                    keyboardType="number-pad"
-                    placeholder="3331234567"
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="Mario Rossi"
                     placeholderTextColor={theme.colors.muted}
+                    style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => usernameRef.current?.focus()}
+                  />
+
+                  <View style={styles.labelRow}>
+                    <Feather name="at-sign" size={14} color={theme.colors.muted} />
+                    <Text style={[styles.label, { color: theme.colors.muted }]}>Username</Text>
+                  </View>
+                  <TextInput
+                    ref={usernameRef}
+                    value={username}
+                    onChangeText={setUsername}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="mariorossi"
+                    placeholderTextColor={theme.colors.muted}
+                    style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => emailRef.current?.focus()}
+                  />
+
+                  <View style={styles.labelRow}>
+                    <Feather name="mail" size={14} color={theme.colors.muted} />
+                    <Text style={[styles.label, { color: theme.colors.muted }]}>Email</Text>
+                  </View>
+                  <TextInput
+                    ref={emailRef}
+                    value={email}
+                    onChangeText={setEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    placeholder="nome@esempio.com"
+                    placeholderTextColor={theme.colors.muted}
+                    style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => phoneRef.current?.focus()}
+                  />
+
+                  <View style={styles.labelRow}>
+                    <Feather name="users" size={14} color={theme.colors.muted} />
+                    <Text style={[styles.label, { color: theme.colors.muted }]}>Sesso</Text>
+                  </View>
+                  <View style={styles.genderRow}>
+                    {GENDER_OPTIONS.map((option) => {
+                      const selected = gender === option.value;
+                      return (
+                        <TouchableOpacity
+                          key={option.value}
+                          style={[
+                            styles.genderChip,
+                            {
+                              borderColor: selected ? theme.colors.primary : theme.colors.border,
+                              backgroundColor: selected ? `${theme.colors.primary}22` : theme.colors.surface,
+                            },
+                          ]}
+                          onPress={() => setGender(option.value)}
+                        >
+                          <Text style={{ color: selected ? theme.colors.primary : theme.colors.text, fontWeight: "700" }}>
+                            {option.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={[styles.sectionCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                  <View style={styles.sectionHeader}>
+                    <View style={[styles.sectionIcon, { backgroundColor: `${theme.colors.primary}14` }]}>
+                      <Feather name="calendar" size={16} color={theme.colors.primary} />
+                    </View>
+                    <View style={styles.sectionHeaderTextBlock}>
+                      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Dettagli opzionali</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.labelRow}>
+                    <Feather name="phone" size={14} color={theme.colors.muted} />
+                    <Text style={[styles.label, { color: theme.colors.muted }]}>Telefono (opzionale)</Text>
+                  </View>
+                  <View style={styles.phoneRow}>
+                    <View
+                      style={[
+                        styles.phonePrefix,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: theme.colors.border,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.phonePrefixText, { color: theme.colors.text }]}>+39</Text>
+                    </View>
+                    <TextInput
+                      ref={phoneRef}
+                      value={phone}
+                      onChangeText={(text) => setPhone(digitsOnly(text))}
+                      keyboardType="number-pad"
+                      placeholder="3331234567"
+                      placeholderTextColor={theme.colors.muted}
+                      style={[
+                        styles.phoneInput,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          color: theme.colors.text,
+                          borderColor: theme.colors.border,
+                        },
+                      ]}
+                      returnKeyType="next"
+                      blurOnSubmit={false}
+                      onSubmitEditing={() => passwordRef.current?.focus()}
+                    />
+                  </View>
+
+                  <View style={styles.labelRow}>
+                    <Feather name="gift" size={14} color={theme.colors.muted} />
+                    <Text style={[styles.label, { color: theme.colors.muted }]}>Data di nascita (opzionale)</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={openBirthDatePicker}
+                    activeOpacity={0.8}
                     style={[
-                      styles.phoneInput,
-                      {
-                        backgroundColor: theme.colors.card,
-                        color: theme.colors.text,
-                        borderColor: theme.colors.border,
-                      },
+                      styles.datePickerButton,
+                      { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
                     ]}
-                    returnKeyType="next"
-                    blurOnSubmit={false}
-                    onSubmitEditing={() => passwordRef.current?.focus()}
-                  />
-                </View>
-
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Sesso</Text>
-                <View style={styles.genderRow}>
-                  {GENDER_OPTIONS.map((option) => {
-                    const selected = gender === option.value;
-                    return (
-                      <TouchableOpacity
-                        key={option.value}
-                        style={[
-                          styles.genderChip,
-                          {
-                            borderColor: selected ? theme.colors.primary : theme.colors.border,
-                            backgroundColor: selected ? `${theme.colors.primary}22` : theme.colors.card,
-                          },
-                        ]}
-                        onPress={() => setGender(option.value)}
+                  >
+                    <View>
+                      <Text
+                        style={{
+                          color: birthDate ? theme.colors.text : theme.colors.muted,
+                          fontSize: 15,
+                          fontWeight: birthDate ? "700" : "500",
+                        }}
                       >
-                        <Text style={{ color: selected ? theme.colors.primary : theme.colors.text, fontWeight: "700" }}>
-                          {option.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                        {birthDate ? formatDateForDisplay(birthDate) : "Seleziona data"}
+                      </Text>
+                    </View>
+                    <View style={[styles.datePickerIconWrap, { backgroundColor: `${theme.colors.primary}14` }]}>
+                      <Feather name="calendar" size={18} color={theme.colors.primary} />
+                    </View>
+                  </TouchableOpacity>
                 </View>
 
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Data di nascita (opzionale)</Text>
-                <TouchableOpacity
-                  onPress={openBirthDatePicker}
-                  activeOpacity={0.8}
-                  style={[
-                    styles.datePickerButton,
-                    { backgroundColor: theme.colors.card, borderColor: theme.colors.border },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      color: birthDate ? theme.colors.text : theme.colors.muted,
-                      fontSize: 15,
-                      fontWeight: birthDate ? "600" : "500",
-                    }}
-                  >
-                    {birthDate || "Seleziona data"}
-                  </Text>
-                  <Feather name="calendar" size={18} color={theme.colors.muted} />
-                </TouchableOpacity>
+                <View style={[styles.sectionCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                  <View style={styles.sectionHeader}>
+                    <View style={[styles.sectionIcon, { backgroundColor: `${theme.colors.primary}14` }]}>
+                      <Feather name="lock" size={16} color={theme.colors.primary} />
+                    </View>
+                    <View style={styles.sectionHeaderTextBlock}>
+                      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Sicurezza account</Text>
+                    </View>
+                  </View>
 
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Password</Text>
-                <View style={styles.passwordWrapper}>
-                  <TouchableOpacity
-                    onPress={() => setSecure((s) => !s)}
-                    style={[styles.eyeButton, { backgroundColor: theme.colors.card }]}
-                  >
-                    <Feather name={secure ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
-                  </TouchableOpacity>
-                  <TextInput
-                    ref={passwordRef}
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry={secure}
-                    placeholder="Almeno 6 caratteri"
-                    placeholderTextColor={theme.colors.muted}
-                    style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                    returnKeyType="next"
-                    blurOnSubmit={false}
-                    onSubmitEditing={() => confirmPasswordRef.current?.focus()}
-                  />
-                </View>
+                  <View style={styles.labelRow}>
+                    <Feather name="key" size={14} color={theme.colors.muted} />
+                    <Text style={[styles.label, { color: theme.colors.muted }]}>Password</Text>
+                  </View>
+                  <View style={styles.passwordWrapper}>
+                    <TouchableOpacity
+                      onPress={() => setSecure((s) => !s)}
+                      style={[styles.eyeButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                    >
+                      <Feather name={secure ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
+                    </TouchableOpacity>
+                    <TextInput
+                      ref={passwordRef}
+                      value={password}
+                      onChangeText={setPassword}
+                      secureTextEntry={secure}
+                      placeholder="Almeno 6 caratteri"
+                      placeholderTextColor={theme.colors.muted}
+                      style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                      returnKeyType="next"
+                      blurOnSubmit={false}
+                      onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+                    />
+                  </View>
 
-                <Text style={[styles.label, { color: theme.colors.muted }]}>Conferma password</Text>
-                <View style={styles.passwordWrapper}>
-                  <TouchableOpacity
-                    onPress={() => setSecureConfirm((s) => !s)}
-                    style={[styles.eyeButton, { backgroundColor: theme.colors.card }]}
-                  >
-                    <Feather name={secureConfirm ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
-                  </TouchableOpacity>
-                  <TextInput
-                    ref={confirmPasswordRef}
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    secureTextEntry={secureConfirm}
-                    placeholder="Ripeti la password"
-                    placeholderTextColor={theme.colors.muted}
-                    style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
-                    returnKeyType="done"
-                    onSubmitEditing={handleRegister}
-                  />
+                  <View style={styles.labelRow}>
+                    <Feather name="shield" size={14} color={theme.colors.muted} />
+                    <Text style={[styles.label, { color: theme.colors.muted }]}>Conferma password</Text>
+                  </View>
+                  <View style={styles.passwordWrapper}>
+                    <TouchableOpacity
+                      onPress={() => setSecureConfirm((s) => !s)}
+                      style={[styles.eyeButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                    >
+                      <Feather name={secureConfirm ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
+                    </TouchableOpacity>
+                    <TextInput
+                      ref={confirmPasswordRef}
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      secureTextEntry={secureConfirm}
+                      placeholder="Ripeti la password"
+                      placeholderTextColor={theme.colors.muted}
+                      style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+                      returnKeyType="done"
+                      onSubmitEditing={handleRegister}
+                    />
+                  </View>
                 </View>
               </View>
 
@@ -414,6 +493,7 @@ export default function RegisterScreen({ navigation }: any) {
                     value={pickerDate}
                     mode="date"
                     display={Platform.OS === "ios" ? "spinner" : "default"}
+                    locale="it-IT"
                     themeVariant={theme.mode}
                     textColor={theme.colors.text as any}
                     accentColor={theme.colors.primary as any}
@@ -446,7 +526,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "flex-start",
     marginBottom: 16,
-    gap: 4,
+    gap: 8,
+  },
+  backIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroBlock: {
+    gap: 6,
+    marginBottom: 14,
   },
   backText: {
     fontSize: 14,
@@ -456,15 +548,50 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: "800",
     marginBottom: 6,
+    letterSpacing: -0.8,
   },
   subtitle: {
     fontSize: 14,
-    marginBottom: 14,
+    lineHeight: 20,
   },
   form: {
-    borderRadius: 16,
+    borderRadius: 22,
     borderWidth: 1,
     padding: 16,
+    gap: 12,
+  },
+  formHeader: {
+    marginBottom: 2,
+  },
+  formTitle: {
+    fontSize: 21,
+    fontWeight: "800",
+    letterSpacing: -0.4,
+  },
+  sectionCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 12,
+  },
+  sectionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sectionHeaderTextBlock: {
+    flex: 1,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: "800",
   },
   bottomActionArea: {
     position: "absolute",
@@ -474,19 +601,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 16,
     padding: 12,
-    gap: 8,
+    gap: 10,
+  },
+  labelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+    marginTop: 2,
   },
   label: {
     fontSize: 12,
-    marginBottom: 6,
-    marginTop: 4,
+    fontWeight: "700",
   },
   input: {
     paddingVertical: 14,
     paddingHorizontal: 14,
-    borderRadius: 12,
+    borderRadius: 14,
     marginBottom: 10,
     borderWidth: 1,
+    fontSize: 15,
   },
   phoneRow: {
     flexDirection: "row",
@@ -517,13 +651,20 @@ const styles = StyleSheet.create({
   datePickerButton: {
     minHeight: 50,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  datePickerIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
   },
   modalOverlay: {
     flex: 1,
@@ -569,8 +710,8 @@ const styles = StyleSheet.create({
   },
   genderChip: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingVertical: 13,
+    borderRadius: 14,
     borderWidth: 1,
     alignItems: "center",
   },
@@ -584,6 +725,7 @@ const styles = StyleSheet.create({
     zIndex: 2,
     padding: 8,
     borderRadius: 10,
+    borderWidth: 1,
   },
   footerRow: {
     marginTop: 14,

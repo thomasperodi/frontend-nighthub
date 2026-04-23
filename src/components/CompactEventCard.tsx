@@ -17,8 +17,17 @@ export default function CompactEventCard({ item, onPress }: any) {
         <Text style={[styles.title, { color: theme.colors.text }]} numberOfLines={1}>{item.title}</Text>
         <Text style={[styles.meta, { color: theme.colors.muted }]}>{item.date} • {item.venue}</Text>
         {item.promos && item.promos.length ? (
-          <View style={[styles.promoMini, { backgroundColor: theme.colors.accent + '12' }]}>
-            <Text style={[styles.promoMiniText, { color: theme.colors.accent }]} numberOfLines={1}>{item.promos[0].title}</Text>
+          <View style={styles.promoWrap}>
+            {item.promos.slice(0, 2).map((promo: any) => (
+              <View key={promo.id} style={[styles.promoMini, { backgroundColor: theme.colors.accent + '12' }]}>
+                <Text style={[styles.promoMiniText, { color: theme.colors.accent }]} numberOfLines={1}>{promo.title}</Text>
+              </View>
+            ))}
+            {item.promos.length > 2 ? (
+              <View style={[styles.promoMini, { backgroundColor: theme.colors.accent + '12' }]}>
+                <Text style={[styles.promoMiniText, { color: theme.colors.accent }]}>+{item.promos.length - 2}</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -32,6 +41,7 @@ const styles = StyleSheet.create({
   content: { flex: 1 },
   title: { fontWeight: "700" },
   meta: { fontSize: 12 },
-  promoMini: { marginTop: 6, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start' },
+  promoWrap: { marginTop: 6, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  promoMini: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start' },
   promoMiniText: { fontSize: 12, fontWeight: '700' }
 });

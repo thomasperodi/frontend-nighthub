@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../providers/AuthProvider";
 import { fetchActiveEventForVenue } from "../../services/events";
+import { getMyVenuePrMembership } from "../../services/prNetwork";
 
 // Import Tab Components
 import IngressoTab from "./tabs/IngressoTab";
@@ -12,6 +13,7 @@ import GuardarobaTab from "./tabs/GuardarobaTab";
 import ImmagineTab from "./tabs/ImmagineTab";
 import CameriereTab from "./tabs/CameriereTab";
 import BarTab from "./tabs/BarTab";
+import PrDashboardTab from "./tabs/PrDashboardTab";
 
 // Import Utilities
 import RoleButton from "./utils/RoleButton";
@@ -23,6 +25,7 @@ type StaffRole =
   | "guardaroba"
   | "immagine"
   | "cameriere"
+  | "pr_dashboard"
   | "bar"
   | null;
 
@@ -31,12 +34,51 @@ const ROLE_OPTIONS: Array<{
   icon: keyof typeof Feather.glyphMap;
   label: string;
   description: string;
+  requiresLiveEvent?: boolean;
+  requiresPrAccess?: boolean;
 }> = [
-  { key: "ingresso", icon: "log-in", label: "Ingresso", description: "Gestisci accessi" },
-  { key: "guardaroba", icon: "archive", label: "Guardaroba", description: "Gestisci capi" },
-  { key: "immagine", icon: "star", label: "Immagine", description: "Tavoli & PR" },
-  { key: "cameriere", icon: "users", label: "Cameriere", description: "Servizio tavoli" },
-  { key: "bar", icon: "coffee", label: "Bar", description: "Vendite rapide" },
+  {
+    key: "ingresso",
+    icon: "log-in",
+    label: "Ingresso",
+    description: "Gestisci accessi",
+    requiresLiveEvent: true,
+  },
+  {
+    key: "guardaroba",
+    icon: "archive",
+    label: "Guardaroba",
+    description: "Gestisci capi",
+    requiresLiveEvent: true,
+  },
+  {
+    key: "immagine",
+    icon: "star",
+    label: "Immagine",
+    description: "Tavoli & PR",
+    requiresLiveEvent: true,
+  },
+  {
+    key: "cameriere",
+    icon: "users",
+    label: "Cameriere",
+    description: "Servizio tavoli",
+    requiresLiveEvent: true,
+  },
+  {
+    key: "bar",
+    icon: "coffee",
+    label: "Bar",
+    description: "Vendite rapide",
+    requiresLiveEvent: true,
+  },
+  {
+    key: "pr_dashboard",
+    icon: "git-branch",
+    label: "PR Dashboard",
+    description: "Gestisci team PR locale",
+    requiresPrAccess: true,
+  },
 ];
 
 const ROLE_LABELS: Record<Exclude<StaffRole, null>, string> = {
@@ -45,6 +87,7 @@ const ROLE_LABELS: Record<Exclude<StaffRole, null>, string> = {
   immagine: "Tavoli & PR",
   cameriere: "Cameriere",
   bar: "Bar",
+  pr_dashboard: "PR Dashboard",
 };
 
 export default function StaffHomeScreen() {
@@ -61,6 +104,8 @@ export default function StaffHomeScreen() {
   const [eventError, setEventError] = useState<string | null>(null);
   const [debugVisible, setDebugVisible] = useState(false);
   const [debugPayload, setDebugPayload] = useState<any>(null);
+  const [prAccessLoading, setPrAccessLoading] = useState(false);
+  const [prDashboardEnabled, setPrDashboardEnabled] = useState(false);
   const hasLiveEvent = !!eventId;
   const canSelectRole = hasLiveEvent && !loadingEvent;
 
@@ -175,6 +220,50 @@ export default function StaffHomeScreen() {
     };
   }, [user?.venue_id]);
 
+  useEffect(() => {
+    const venueId = user?.venue_id;
+    let mounted = true;
+
+    if (!venueId) {
+      setPrDashboardEnabled(false);
+      setPrAccessLoading(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    setPrAccessLoading(true);
+    void (async () => {
+      try {
+        const access = await getMyVenuePrMembership(venueId);
+        if (!mounted) return;
+        setPrDashboardEnabled(Boolean(access?.can_access_dashboard));
+      } catch {
+        if (!mounted) return;
+        setPrDashboardEnabled(false);
+      } finally {
+        if (mounted) setPrAccessLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [user?.venue_id]);
+
+  const isRoleDisabled = useCallback(
+    (item: (typeof ROLE_OPTIONS)[number]) => {
+      if (item.requiresPrAccess) {
+        return !user?.venue_id || prAccessLoading || !prDashboardEnabled;
+      }
+      if (item.requiresLiveEvent) {
+        return !canSelectRole;
+      }
+      return false;
+    },
+    [canSelectRole, prAccessLoading, prDashboardEnabled, user?.venue_id],
+  );
+
   const handleLogout = () => {
     Alert.alert(
       "Logout",
@@ -243,11 +332,17 @@ export default function StaffHomeScreen() {
                 icon={item.icon}
                 label={item.label}
                 description={item.description}
-                disabled={!canSelectRole}
+                disabled={isRoleDisabled(item)}
                 onPress={() => setRole(item.key)}
               />
             ))}
           </View>
+
+          {!prAccessLoading && !prDashboardEnabled && (
+            <Text style={[styles.roleHintText, { color: theme.colors.text }]}>
+              La voce PR Dashboard si abilita quando il tuo utente e autorizzato nel network PR del locale.
+            </Text>
+          )}
         </ScrollView>
 
         <View style={styles.selectionFooter}>
@@ -376,6 +471,7 @@ export default function StaffHomeScreen() {
             showToast={showToast}
             eventId={eventId}
             staffId={user?.id}
+            venueId={user?.venue_id ?? undefined}
           />
         )}
         {role === "immagine" && (
@@ -401,6 +497,14 @@ export default function StaffHomeScreen() {
             showToast={showToast}
             eventId={eventId}
             staffId={user?.id}
+            venueId={user?.venue_id ?? undefined}
+          />
+        )}
+        {role === "pr_dashboard" && (
+          <PrDashboardTab
+            venueId={user?.venue_id ?? undefined}
+            preferredEventId={eventId || null}
+            showToast={showToast}
           />
         )}
       </View>
@@ -499,6 +603,15 @@ const styles = StyleSheet.create({
   roleGrid: {
     width: '100%',
     marginTop: 8,
+  },
+
+  roleHintText: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: "600",
+    opacity: 0.75,
+    textAlign: "center",
+    lineHeight: 18,
   },
 
   selectionFooter: {

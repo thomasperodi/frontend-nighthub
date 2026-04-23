@@ -4,6 +4,26 @@ import type { User } from './users';
 
 export type ReservationUser = Pick<User, 'id' | 'name' | 'email' | 'phone'>;
 
+export type ReservationInvitationStatus = 'pending' | 'accepted' | 'declined';
+
+export type ReservationTableInvite = {
+  user_id: string;
+  status: ReservationInvitationStatus;
+  source: 'direct' | 'group';
+  invited_group_ids?: string[];
+  responded_at?: string | null;
+};
+
+export type ReservationMeta = {
+  booking_mode?: string;
+  zone_label?: string;
+  invited_friend_ids?: string[];
+  invited_group_ids?: string[];
+  inviter_user_id?: string;
+  inviter_name?: string;
+  table_invites?: ReservationTableInvite[];
+};
+
 export type Reservation = {
   id: string;
   user_id: string;
@@ -11,6 +31,7 @@ export type Reservation = {
   venue_zone_id?: string | null;
   venue_table_id?: string | null;
   table_name?: string | null;
+  meta?: ReservationMeta | null;
   type: 'table' | 'entry';
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
   guests: number;
@@ -38,6 +59,10 @@ export type CreateReservationDto = {
   table_name?: string | null;
   status?: Reservation['status'];
   total_amount?: number;
+  meta?: Partial<ReservationMeta> & {
+    zona?: string;
+    invited_groups?: string[];
+  };
 };
 
 export type UpdateReservationDto = Partial<CreateReservationDto> & {

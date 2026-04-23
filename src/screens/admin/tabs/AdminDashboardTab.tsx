@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   RefreshControl,
@@ -9,21 +9,14 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { useTheme } from "../../../theme/ThemeProvider";
 import { fetchAdminDashboard } from "../../../services/admin";
+import { useTheme } from "../../../theme/ThemeProvider";
 import { AdminDashboardData } from "../../../types/admin";
+import { average, clamp, formatCompactNumber, formatCurrency, formatFullDate } from "../adminUtils";
 
-const currencyFormatter = new Intl.NumberFormat("it-IT", {
-  style: "currency",
-  currency: "EUR",
-  maximumFractionDigits: 0,
-});
-
-const dateFormatter = new Intl.DateTimeFormat("it-IT", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
+type Props = {
+  onQuickAction?: (tabKey: "dashboard" | "venues" | "users" | "reports" | "profile") => void;
+};
 
 type LoadState = {
   loading: boolean;
@@ -32,7 +25,33 @@ type LoadState = {
   data: AdminDashboardData | null;
 };
 
-export default function AdminDashboardTab() {
+type KpiCard = {
+  label: string;
+  value: string;
+  sub?: string;
+  icon: keyof typeof Feather.glyphMap;
+  trend?: string;
+  up?: boolean;
+  warning?: boolean;
+};
+
+const todayFormatter = new Intl.DateTimeFormat("it-IT", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
+
+const withSign = (value: number) => `${value > 0 ? "+" : ""}${value}`;
+
+const formatStayDuration = (minutes: number) => {
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const mins = safeMinutes % 60;
+  if (hours <= 0) return `${mins}m`;
+  return `${hours}h ${mins}m`;
+};
+
+export default function AdminDashboardTab({ onQuickAction }: Props) {
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
@@ -52,7 +71,7 @@ export default function AdminDashboardTab() {
     }));
 
     try {
-      const data = await fetchAdminDashboard();
+      const data = await fetchAdminDashboard({ force: asRefresh });
       setState({ loading: false, refreshing: false, error: null, data });
     } catch (error: any) {
       const message = error?.response?.data?.message || error?.message || "Errore nel caricamento dashboard";
@@ -65,14 +84,173 @@ export default function AdminDashboardTab() {
     }
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     void loadDashboard(false);
   }, [loadDashboard]);
 
   const metrics = state.data?.metrics;
-  const urgentContract = state.data?.expiringContracts?.[0] ?? null;
-  const topVenue = state.data?.topVenues?.[0] ?? null;
-  const firstAlert = state.data?.alerts?.[0] ?? null;
+  const revenue = state.data?.revenue ?? [];
+  const topVenues = state.data?.topVenues ?? [];
+  const contracts = state.data?.expiringContracts ?? [];
+  const alerts = state.data?.alerts ?? [];
+
+  const criticalAlerts = alerts.filter((alert) => alert.severity === "critical").length;
+  const warningAlerts = alerts.filter((alert) => alert.severity === "warning").length;
+
+  const operatingScore = clamp(
+    100 - criticalAlerts * 18 - warningAlerts * 10 - (metrics?.contractsMissingData ?? 0) * 4 + (metrics?.eventsActiveToday ?? 0) * 2,
+    32,
+    99,
+  );
+
+  const chartMax = useMemo(() => Math.max(...revenue.map((item) => item.value), 1), [revenue]);
+  const trendDelta = useMemo(() => {
+    if (revenue.length < 2) return 0;
+    const prev = revenue[revenue.length - 2]?.value ?? 0;
+    const last = revenue[revenue.length - 1]?.value ?? 0;
+    if (prev <= 0) return 0;
+    return Math.round(((last - prev) / prev) * 100);
+  }, [revenue]);
+
+  const revenueWeek = revenue.reduce((total, item) => total + item.value, 0);
+  const avgDaily = average(revenue.map((item) => item.value));
+  const monthRevenue = metrics?.revenueMonth ?? revenueWeek;
+  const paidOrdersRate =
+    state.data && state.data.ordersMonth.total > 0
+      ? Math.round((state.data.ordersMonth.paid / state.data.ordersMonth.total) * 100)
+      : 0;
+  const avgReservationsBaseline = metrics ? metrics.totalReservations / 30 : 0;
+  const reservationsTrend =
+    metrics && avgReservationsBaseline > 0
+      ? Math.round(((metrics.reservationsToday - avgReservationsBaseline) / avgReservationsBaseline) * 100)
+      : 0;
+  const activeUsersRate =
+    metrics && metrics.totalUsers > 0
+      ? Math.round((metrics.activeUsers30d / metrics.totalUsers) * 100)
+      : 0;
+
+  const kpis = useMemo(
+    (): KpiCard[] => [
+      {
+        label: "Locali attivi",
+        value: metrics ? `${metrics.activeVenues}/${metrics.totalVenues}` : "-",
+        sub: "network",
+        icon: "map-pin" as const,
+        trend: metrics ? withSign(metrics.activeVenues - (metrics.totalVenues - metrics.activeVenues)) : "",
+        up: true,
+      },
+      {
+        label: "Utenti attivi 30gg",
+        value: metrics ? formatCompactNumber(metrics.activeUsers30d) : "-",
+        sub: metrics ? `${metrics.totalUsers} totali` : "",
+        icon: "users" as const,
+        trend: metrics ? `${activeUsersRate}%` : "",
+        up: true,
+      },
+      {
+        label: "Nuovi utenti 30gg",
+        value: metrics ? formatCompactNumber(metrics.newUsers30d) : "-",
+        sub: "acquisizione",
+        icon: "user-plus" as const,
+        trend: metrics ? `+${metrics.newUsers30d}` : "",
+        up: true,
+      },
+      {
+        label: "Eventi oggi",
+        value: metrics ? String(metrics.eventsActiveToday) : "-",
+        sub: "attivi",
+        icon: "calendar" as const,
+        trend: metrics ? withSign(metrics.eventsActiveToday) : "",
+        up: true,
+      },
+      {
+        label: "Eventi mese",
+        value: metrics ? String(metrics.eventsCompletedMonth) : "-",
+        sub: "conclusi",
+        icon: "calendar" as const,
+        trend: metrics ? `+${metrics.eventsCompletedMonth}` : "",
+        up: true,
+      },
+      {
+        label: "Prenotazioni oggi",
+        value: metrics ? formatCompactNumber(metrics.reservationsToday) : "-",
+        sub: "check-in e tavoli",
+        icon: "credit-card" as const,
+        trend: metrics ? `${withSign(reservationsTrend)}%` : "",
+        up: reservationsTrend >= 0,
+      },
+      {
+        label: "Ricavi periodo",
+        value: formatCurrency(monthRevenue),
+        sub: "mese corrente",
+        icon: "trending-up" as const,
+        trend: `${trendDelta >= 0 ? "+" : ""}${trendDelta}%`,
+        up: trendDelta >= 0,
+      },
+      {
+        label: "Ticket medio",
+        value: metrics ? formatCurrency(metrics.avgOrderValue) : "-",
+        sub: "ordine pagato",
+        icon: "receipt" as const,
+        trend: metrics ? `€${Math.round(metrics.avgOrderValue)}` : "",
+        up: true,
+      },
+      {
+        label: "Sessioni venue 30gg",
+        value: metrics ? formatCompactNumber(metrics.sessions30d) : "-",
+        icon: "eye" as const,
+        trend: metrics ? `+${formatCompactNumber(metrics.sessions30d)}` : "",
+        up: true,
+      },
+      {
+        label: "Permanenza media",
+        value: metrics ? formatStayDuration(metrics.avgStayMinutes30d) : "-",
+        sub: "sul locale",
+        icon: "clock" as const,
+      },
+      {
+        label: "Alert aperti",
+        value: String(alerts.length),
+        icon: "alert-triangle" as const,
+        sub: "monitoraggio",
+        warning: alerts.length > 0,
+        up: false,
+      },
+      {
+        label: "Contratti in scadenza",
+        value: metrics ? String(metrics.contractsExpiringIn30d) : "0",
+        sub: "prossimi 30gg",
+        icon: "file-text" as const,
+        warning: (metrics?.contractsExpiringIn30d ?? 0) > 0,
+        up: false,
+      },
+      {
+        label: "Ordini pagati",
+        value: `${paidOrdersRate}%`,
+        sub: state.data ? `${state.data.ordersMonth.paid} / ${state.data.ordersMonth.total}` : "",
+        icon: "credit-card" as const,
+        trend: state.data ? `+${state.data.ordersMonth.paid}` : "",
+        up: true,
+      },
+    ],
+    [
+      activeUsersRate,
+      alerts.length,
+      metrics,
+      monthRevenue,
+      paidOrdersRate,
+      reservationsTrend,
+      state.data,
+      trendDelta,
+    ],
+  );
+
+  const quickActions = [
+    { key: "venues" as const, label: "Scadenze", icon: "file-text" as const },
+    { key: "venues" as const, label: "Extra utilizzo", icon: "zap" as const },
+    { key: "reports" as const, label: "Report", icon: "bar-chart-2" as const },
+    { key: "users" as const, label: "Utenti & ruoli", icon: "shield" as const },
+  ];
 
   return (
     <ScrollView
@@ -88,14 +266,45 @@ export default function AdminDashboardTab() {
     >
       <View style={styles.container}>
         <View style={styles.heroCard}>
-          <View style={styles.heroTextWrap}>
-            <Text style={styles.heroTitle}>Panoramica essenziale</Text>
-            <Text style={styles.heroSubtitle}>I numeri più utili per decidere subito.</Text>
+          <View style={styles.heroHeader}>
+            <View style={styles.heroTitleWrap}>
+              <Text style={styles.heroTitle}>NIGHTHUB</Text>
+              <Text style={styles.heroSubtitle}>Cabina di regia · {todayFormatter.format(new Date())}</Text>
+            </View>
+            <View style={styles.statusPill}>
+              <View style={styles.statusDot} />
+              <Text style={styles.statusText}>Online</Text>
+            </View>
           </View>
-          <TouchableOpacity style={styles.refreshButton} onPress={() => void loadDashboard(true)}>
-            <Feather name="refresh-cw" size={14} color={theme.colors.text} />
-            <Text style={styles.refreshButtonText}>Aggiorna</Text>
-          </TouchableOpacity>
+
+          <View style={styles.scoreRow}>
+            <View style={styles.scoreCircleWrap}>
+              <Text style={styles.scoreValue}>{operatingScore}</Text>
+              <Text style={styles.scoreSuffix}>/100</Text>
+            </View>
+            <View style={styles.scoreCopy}>
+              <Text style={styles.scoreTitle}>Operating Score</Text>
+              <Text style={styles.scoreHint}>Piattaforma sotto controllo operativo</Text>
+              <Text style={styles.scoreMeta}>{criticalAlerts} critici · {warningAlerts} warning</Text>
+            </View>
+            <TouchableOpacity style={styles.refreshButton} onPress={() => void loadDashboard(true)}>
+              <Feather name="refresh-cw" size={14} color={theme.colors.text} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.quickActionsRow}>
+          {quickActions.map((action) => (
+            <TouchableOpacity
+              key={action.label}
+              style={styles.quickActionButton}
+              onPress={() => onQuickAction?.(action.key)}
+              activeOpacity={0.86}
+            >
+              <Feather name={action.icon} size={14} color={theme.colors.primary} />
+              <Text style={styles.quickActionText}>{action.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {state.loading ? (
@@ -112,117 +321,126 @@ export default function AdminDashboardTab() {
           </View>
         ) : null}
 
-        {metrics ? (
-          <>
-            <View style={styles.mainCard}>
-              <Text style={styles.mainLabel}>Ricavi del mese</Text>
-              <Text style={styles.mainValue}>{currencyFormatter.format(metrics.revenueMonth)}</Text>
-              <Text style={styles.mainHint}>
-                Ticket medio {currencyFormatter.format(metrics.avgOrderValue)} • Prenotazioni oggi {metrics.reservationsToday}
-              </Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionLabel}>KPI Principali</Text>
+          <Text style={styles.sectionHint}>Basati sui dati live API</Text>
+        </View>
+
+        <View style={styles.kpiGrid}>
+          {kpis.map((kpi) => (
+            <View key={kpi.label} style={[styles.kpiCard, kpi.warning ? styles.kpiCardWarning : null]}>
+              <View style={styles.kpiTopRow}>
+                <Feather name={kpi.icon} size={14} color={kpi.warning ? "#f59e0b" : theme.colors.primary} />
+                {kpi.trend ? (
+                  <View style={styles.kpiTrendWrap}>
+                    <Feather
+                      name={kpi.up === false ? "arrow-down-right" : "arrow-up-right"}
+                      size={11}
+                      color={kpi.warning ? "#f59e0b" : kpi.up === false ? theme.colors.error : "#34d399"}
+                    />
+                    <Text
+                      style={[
+                        styles.kpiTrend,
+                        kpi.warning ? styles.kpiTrendWarning : null,
+                        kpi.up === false && !kpi.warning ? styles.kpiTrendDown : null,
+                      ]}
+                    >
+                      {kpi.trend}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.kpiValue}>{kpi.value}</Text>
+              <Text style={styles.kpiLabel}>{kpi.label}</Text>
+              {kpi.sub ? <Text style={styles.kpiSub}>{kpi.sub}</Text> : null}
             </View>
+          ))}
+        </View>
 
-            <View style={styles.kpiRow}>
-              <KpiCard icon="users" label="Utenti attivi" value={metrics.activeUsers30d.toLocaleString("it-IT")} />
-              <KpiCard icon="map-pin" label="Locali attivi" value={`${metrics.activeVenues}/${metrics.totalVenues}`} />
-              <KpiCard icon="clock" label="Permanenza media" value={`${metrics.avgStayMinutes30d} min`} />
-              <KpiCard icon="calendar" label="Scadenze 30g" value={`${metrics.contractsExpiringIn30d}`} />
-            </View>
-          </>
-        ) : null}
+        <View style={styles.card}>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.cardTitle}>Trend Ricavi</Text>
+            <Text style={[styles.cardTitleTrend, trendDelta >= 0 ? styles.trendUp : styles.trendDown]}>
+              {trendDelta >= 0 ? "+" : ""}{trendDelta}%
+            </Text>
+          </View>
+          <View style={styles.revenueBarsRow}>
+            {revenue.slice(-6).map((item) => (
+              <View key={`${item.label}-${item.value}`} style={styles.revenueBarItem}>
+                <View style={styles.revenueTrack}>
+                  <View style={[styles.revenueFill, { height: Math.max(10, Math.round((item.value / chartMax) * 82)) }]} />
+                </View>
+                <Text style={styles.revenueLabel}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.revenueHint}>Media periodo {formatCurrency(avgDaily)} / giorno</Text>
+        </View>
 
-        <Section title="Focus di oggi">
-          <FocusItem
-            icon="alert-circle"
-            label="Priorità contratti"
-            value={
-              urgentContract
-                ? `${urgentContract.venueName} • ${urgentContract.daysLeft} gg`
-                : "Nessuna urgenza"
-            }
-            note={
-              urgentContract
-                ? `Scadenza ${dateFormatter.format(new Date(urgentContract.expiresAt))}`
-                : ""
-            }
-          />
+        <View style={styles.sectionBlock}>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.cardTitle}>Top Locali per Fatturato</Text>
+            <TouchableOpacity onPress={() => onQuickAction?.("venues")}>
+              <Text style={styles.linkText}>Tutti</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.listWrap}>
+            {topVenues.slice(0, 4).map((venue, index) => (
+              <View key={venue.id} style={styles.listItem}>
+                <Text style={styles.rank}>#{index + 1}</Text>
+                <View style={styles.listCopy}>
+                  <Text style={styles.listTitle}>{venue.name}</Text>
+                  <Text style={styles.listSub}>{formatCurrency(venue.revenue)}</Text>
+                </View>
+              </View>
+            ))}
+            {!topVenues.length ? <Text style={styles.emptyText}>Nessun locale disponibile.</Text> : null}
+          </View>
+        </View>
 
-          <FocusItem
-            icon="award"
-            label="Top locale"
-            value={topVenue ? topVenue.name : "Nessun dato"}
-            note={topVenue ? currencyFormatter.format(topVenue.revenue) : ""}
-          />
+        <View style={styles.sectionBlock}>
+          <Text style={styles.cardTitle}>Contratti in Scadenza</Text>
+          <View style={styles.listWrap}>
+            {contracts.slice(0, 3).map((contract) => (
+              <View key={contract.venueId} style={[styles.listItem, styles.warningItem]}>
+                <Feather name="clock" size={14} color="#f59e0b" />
+                <View style={styles.listCopy}>
+                  <Text style={styles.listTitle}>{contract.venueName}</Text>
+                  <Text style={styles.listSub}>{contract.daysLeft} gg · {formatFullDate(contract.expiresAt)}</Text>
+                </View>
+              </View>
+            ))}
+            {!contracts.length ? <Text style={styles.emptyText}>Nessuna scadenza nei prossimi giorni.</Text> : null}
+          </View>
+        </View>
 
-          <FocusItem
-            icon="bell"
-            label="Alert principale"
-            value={firstAlert ? firstAlert.title : "Nessun alert"}
-            note={firstAlert ? firstAlert.detail : ""}
-          />
-        </Section>
+        <View style={styles.sectionBlock}>
+          <Text style={styles.cardTitle}>Alert</Text>
+          <View style={styles.listWrap}>
+            {alerts.slice(0, 3).map((alert) => (
+              <View
+                key={String(alert.id)}
+                style={[
+                  styles.alertItem,
+                  alert.severity === "critical"
+                    ? styles.alertCritical
+                    : alert.severity === "warning"
+                      ? styles.alertWarning
+                      : styles.alertInfo,
+                ]}
+              >
+                <Feather name="alert-triangle" size={14} color={theme.colors.text} />
+                <View style={styles.listCopy}>
+                  <Text style={styles.listTitle}>{alert.title}</Text>
+                  <Text style={styles.listSub}>{alert.detail}</Text>
+                </View>
+              </View>
+            ))}
+            {!alerts.length ? <Text style={styles.emptyText}>Nessun alert aperto.</Text> : null}
+          </View>
+        </View>
       </View>
     </ScrollView>
-  );
-
-  function KpiCard({
-    icon,
-    label,
-    value,
-  }: {
-    icon: keyof typeof Feather.glyphMap;
-    label: string;
-    value: string;
-  }) {
-    return (
-      <View style={styles.kpiCard}>
-        <View style={styles.kpiHead}>
-          <Feather name={icon} size={14} color={theme.colors.primary} />
-          <Text style={styles.kpiLabel}>{label}</Text>
-        </View>
-        <Text style={styles.kpiValue}>{value}</Text>
-      </View>
-    );
-  }
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  const { theme } = useTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.sectionBody}>{children}</View>
-    </View>
-  );
-}
-
-function FocusItem({
-  icon,
-  label,
-  value,
-  note,
-}: {
-  icon: keyof typeof Feather.glyphMap;
-  label: string;
-  value: string;
-  note: string;
-}) {
-  const { theme } = useTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-
-  return (
-    <View style={styles.focusItem}>
-      <View style={styles.focusIconWrap}>
-        <Feather name={icon} size={14} color={theme.colors.primary} />
-      </View>
-      <View style={styles.focusTextWrap}>
-        <Text style={styles.focusLabel}>{label}</Text>
-        <Text style={styles.focusValue}>{value}</Text>
-        {note ? <Text style={styles.focusNote}>{note}</Text> : null}
-      </View>
-    </View>
   );
 }
 
@@ -234,54 +452,143 @@ const createStyles = (theme: any) =>
     container: {
       paddingHorizontal: 20,
       paddingTop: 10,
-      gap: 12,
+      gap: 14,
     },
     heroCard: {
-      borderRadius: 14,
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      padding: 12,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      padding: 14,
+      gap: 10,
+    },
+    heroHeader: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      gap: 8,
+      gap: 10,
     },
-    heroTextWrap: {
-      flex: 1,
+    heroTitleWrap: {
       gap: 2,
+      flex: 1,
     },
     heroTitle: {
-      fontSize: 16,
+      fontSize: 20,
       fontWeight: "900",
       color: theme.colors.text,
     },
     heroSubtitle: {
-      fontSize: 12,
-      color: theme.colors.muted,
+      fontSize: 11,
       fontWeight: "600",
+      color: theme.colors.muted,
     },
-    refreshButton: {
+    statusPill: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: "rgba(52, 211, 153, 0.35)",
+      backgroundColor: "rgba(52, 211, 153, 0.14)",
+      paddingHorizontal: 10,
+      paddingVertical: 5,
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
-      borderRadius: 10,
+    },
+    statusDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      backgroundColor: "#34d399",
+    },
+    statusText: {
+      color: "#34d399",
+      fontSize: 10,
+      fontWeight: "800",
+    },
+    scoreRow: {
+      borderRadius: 14,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
+      borderColor: "rgba(255,255,255,0.12)",
+      backgroundColor: "rgba(255,255,255,0.05)",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      padding: 10,
+    },
+    scoreCircleWrap: {
+      width: 58,
+      height: 58,
+      borderRadius: 15,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.14)",
+      backgroundColor: "rgba(255,255,255,0.03)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    scoreValue: {
+      fontSize: 21,
+      fontWeight: "900",
+      color: theme.colors.text,
+      lineHeight: 22,
+    },
+    scoreSuffix: {
+      fontSize: 9,
+      fontWeight: "700",
+      color: theme.colors.muted,
+    },
+    scoreCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    scoreTitle: {
+      color: theme.colors.text,
+      fontSize: 13,
+      fontWeight: "900",
+    },
+    scoreHint: {
+      color: theme.colors.muted,
+      fontSize: 11,
+      fontWeight: "600",
+    },
+    scoreMeta: {
+      color: theme.colors.muted,
+      fontSize: 10,
+      fontWeight: "700",
+    },
+    refreshButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.14)",
+      backgroundColor: "rgba(255,255,255,0.08)",
+    },
+    quickActionsRow: {
+      flexDirection: "row",
+      gap: 8,
+      flexWrap: "wrap",
+    },
+    quickActionButton: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.12)",
+      backgroundColor: "rgba(255,255,255,0.04)",
       paddingHorizontal: 10,
       paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
     },
-    refreshButtonText: {
+    quickActionText: {
       color: theme.colors.text,
-      fontSize: 12,
-      fontWeight: "700",
+      fontSize: 11,
+      fontWeight: "800",
     },
     loadingContainer: {
       flexDirection: "row",
       alignItems: "center",
       gap: 8,
-      paddingHorizontal: 4,
     },
     loadingText: {
       color: theme.colors.muted,
@@ -292,8 +599,8 @@ const createStyles = (theme: any) =>
       borderRadius: 12,
       borderWidth: 1,
       borderColor: theme.colors.error,
-      backgroundColor: `${theme.colors.error}1a`,
-      padding: 12,
+      backgroundColor: `${theme.colors.error}16`,
+      padding: 10,
       flexDirection: "row",
       alignItems: "center",
       gap: 8,
@@ -304,107 +611,212 @@ const createStyles = (theme: any) =>
       fontSize: 12,
       fontWeight: "600",
     },
-    mainCard: {
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      padding: 14,
-      gap: 3,
-    },
-    mainLabel: {
-      fontSize: 12,
-      color: theme.colors.muted,
-      fontWeight: "700",
-    },
-    mainValue: {
-      fontSize: 28,
-      color: theme.colors.text,
-      fontWeight: "900",
-    },
-    mainHint: {
-      fontSize: 12,
-      color: theme.colors.primary,
-      fontWeight: "700",
-    },
-    kpiRow: {
+    kpiGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
-      gap: 10,
+      gap: 8,
+    },
+    sectionHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginTop: 2,
+    },
+    sectionLabel: {
+      fontSize: 12,
+      fontWeight: "900",
+      color: theme.colors.text,
+      textTransform: "uppercase",
+      letterSpacing: 0.6,
+    },
+    sectionHint: {
+      fontSize: 10,
+      fontWeight: "700",
+      color: theme.colors.muted,
     },
     kpiCard: {
       width: "48%",
-      minHeight: 78,
-      borderRadius: 12,
+      borderRadius: 14,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
-      padding: 10,
-      justifyContent: "space-between",
+      borderColor: "rgba(255,255,255,0.12)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      gap: 4,
     },
-    kpiHead: {
+    kpiCardWarning: {
+      borderColor: "rgba(245, 158, 11, 0.35)",
+      backgroundColor: "rgba(245, 158, 11, 0.12)",
+    },
+    kpiTopRow: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 6,
+      justifyContent: "space-between",
     },
-    kpiLabel: {
-      fontSize: 11,
-      color: theme.colors.muted,
-      fontWeight: "700",
+    kpiTrendWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+    },
+    kpiTrend: {
+      fontSize: 10,
+      color: "#34d399",
+      fontWeight: "800",
+    },
+    kpiTrendWarning: {
+      color: "#f59e0b",
+    },
+    kpiTrendDown: {
+      color: theme.colors.error,
     },
     kpiValue: {
       fontSize: 18,
-      color: theme.colors.text,
       fontWeight: "900",
-    },
-    section: {
-      gap: 8,
-      marginTop: 4,
-    },
-    sectionTitle: {
-      fontSize: 16,
       color: theme.colors.text,
-      fontWeight: "900",
     },
-    sectionBody: {
+    kpiLabel: {
+      fontSize: 10,
+      color: theme.colors.muted,
+      fontWeight: "700",
+      lineHeight: 13,
+    },
+    kpiSub: {
+      fontSize: 10,
+      color: `${theme.colors.muted}cc`,
+      fontWeight: "600",
+      lineHeight: 13,
+      marginTop: 1,
+    },
+    card: {
       borderRadius: 14,
       borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.card,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
       padding: 10,
-      gap: 10,
+      gap: 8,
     },
-    focusItem: {
+    cardTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    cardTitle: {
+      color: theme.colors.text,
+      fontSize: 13,
+      fontWeight: "900",
+    },
+    cardTitleTrend: {
+      fontSize: 11,
+      fontWeight: "800",
+    },
+    trendUp: {
+      color: "#34d399",
+    },
+    trendDown: {
+      color: theme.colors.error,
+    },
+    revenueBarsRow: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    revenueBarItem: {
+      flex: 1,
+      alignItems: "center",
+      gap: 4,
+    },
+    revenueTrack: {
+      height: 82,
+      justifyContent: "flex-end",
+    },
+    revenueFill: {
+      width: 12,
+      borderRadius: 999,
+      backgroundColor: theme.colors.primary,
+    },
+    revenueLabel: {
+      fontSize: 9,
+      color: theme.colors.muted,
+      fontWeight: "700",
+    },
+    revenueHint: {
+      fontSize: 10,
+      color: theme.colors.muted,
+      fontWeight: "700",
+    },
+    sectionBlock: {
+      gap: 8,
+    },
+    listWrap: {
+      gap: 8,
+    },
+    listItem: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.04)",
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    warningItem: {
+      borderColor: "rgba(245, 158, 11, 0.35)",
+      backgroundColor: "rgba(245, 158, 11, 0.11)",
+    },
+    alertItem: {
+      borderRadius: 12,
+      borderWidth: 1,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
       flexDirection: "row",
       alignItems: "flex-start",
       gap: 8,
     },
-    focusIconWrap: {
-      width: 28,
-      height: 28,
-      borderRadius: 9,
-      backgroundColor: `${theme.colors.primary}1f`,
-      alignItems: "center",
-      justifyContent: "center",
+    alertCritical: {
+      borderColor: "rgba(239, 68, 68, 0.35)",
+      backgroundColor: "rgba(239, 68, 68, 0.12)",
     },
-    focusTextWrap: {
+    alertWarning: {
+      borderColor: "rgba(245, 158, 11, 0.35)",
+      backgroundColor: "rgba(245, 158, 11, 0.12)",
+    },
+    alertInfo: {
+      borderColor: "rgba(56, 189, 248, 0.35)",
+      backgroundColor: "rgba(56, 189, 248, 0.12)",
+    },
+    rank: {
+      width: 22,
+      color: theme.colors.muted,
+      fontSize: 11,
+      fontWeight: "900",
+    },
+    listCopy: {
       flex: 1,
       gap: 2,
     },
-    focusLabel: {
-      fontSize: 11,
-      color: theme.colors.muted,
-      fontWeight: "700",
-    },
-    focusValue: {
-      fontSize: 13,
+    listTitle: {
       color: theme.colors.text,
+      fontSize: 12,
       fontWeight: "800",
     },
-    focusNote: {
-      fontSize: 11,
+    listSub: {
       color: theme.colors.muted,
+      fontSize: 10,
       fontWeight: "600",
-      lineHeight: 15,
+      lineHeight: 13,
+    },
+    linkText: {
+      color: theme.colors.primary,
+      fontSize: 11,
+      fontWeight: "800",
+    },
+    emptyText: {
+      color: theme.colors.muted,
+      fontSize: 11,
+      fontWeight: "600",
     },
   });

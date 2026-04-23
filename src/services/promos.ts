@@ -2,6 +2,7 @@ import { api } from './api';
 import { API_ENDPOINTS } from '../constants/endpoints';
 import { Promo } from '../types/events';
 import { UserPromo } from '../types/users';
+import axios from 'axios';
 
 /**
  * Promos Service - Handles all promo-related API calls
@@ -19,16 +20,30 @@ export async function fetchPromos(): Promise<Promo[]> {
  * Fetch promos by event
  */
 export async function fetchPromosByEvent(eventId: string): Promise<Promo[]> {
-  const { data } = await api.get(API_ENDPOINTS.PROMOS.BY_EVENT(eventId));
-  return data;
+  try {
+    const { data } = await api.get(API_ENDPOINTS.PROMOS.BY_EVENT(eventId));
+    return data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 /**
  * Fetch promos by venue
  */
 export async function fetchPromosByVenue(venueId: string): Promise<Promo[]> {
-  const { data } = await api.get(API_ENDPOINTS.PROMOS.BY_VENUE(venueId));
-  return data;
+  try {
+    const { data } = await api.get(API_ENDPOINTS.PROMOS.BY_VENUE(venueId));
+    return data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 /**

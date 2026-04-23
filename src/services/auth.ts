@@ -54,6 +54,10 @@ export async function logoutApi() {
   await api.post('/auth/logout');
 }
 
+export async function sendActivityHeartbeat() {
+  await api.post('/auth/activity');
+}
+
 export async function deleteAccountApi() {
   // delete current user (requires Authorization header)
   const res = await api.delete('/auth/me');
