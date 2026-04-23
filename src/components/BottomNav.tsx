@@ -148,6 +148,7 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     color: "white",
+    fontFamily: Platform.select({ ios: "System", android: "Roboto" }),
     fontSize: 9,
     fontWeight: "800",
   },
