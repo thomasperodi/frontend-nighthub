@@ -60,10 +60,12 @@ function digitsOnly(value: string): string {
   return value.replace(/\D/g, "");
 }
 
-export default function RegisterScreen({ navigation }: any) {
+export default function RegisterScreen({ navigation, route }: any) {
   const { theme } = useTheme();
   const { signIn } = useAuth();
   const insets = useSafeAreaInsets();
+  const isFirstLaunch = route?.params?.firstLaunch === true;
+  const canShowLoginActions = !isFirstLaunch;
 
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
@@ -180,17 +182,24 @@ export default function RegisterScreen({ navigation }: any) {
               styles.scrollContent,
               { paddingBottom: (insets.bottom || 0) + (keyboardVisible ? 28 : 185) },
             ]}
-            keyboardShouldPersistTaps="always"
-            keyboardDismissMode="none"
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             contentInsetAdjustmentBehavior="always"
             showsVerticalScrollIndicator={false}
           >
-              <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-                <View style={[styles.backIconWrap, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-                  <Feather name="chevron-left" size={18} color={theme.colors.text} />
-                </View>
-                <Text style={[styles.backText, { color: theme.colors.text }]}>Login</Text>
-              </TouchableOpacity>
+              {canShowLoginActions ? (
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => navigation.goBack()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Torna al login"
+                >
+                  <View style={[styles.backIconWrap, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+                    <Feather name="chevron-left" size={18} color={theme.colors.text} />
+                  </View>
+                  <Text style={[styles.backText, { color: theme.colors.text }]}>Login</Text>
+                </TouchableOpacity>
+              ) : null}
 
               <View style={styles.heroBlock}>
                 <Text style={[styles.title, { color: theme.colors.text }]}>Crea account cliente</Text>
@@ -223,10 +232,13 @@ export default function RegisterScreen({ navigation }: any) {
                     onChangeText={setName}
                     placeholder="Mario Rossi"
                     placeholderTextColor={theme.colors.muted}
+                    autoComplete="name"
+                    textContentType="name"
                     style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
                     returnKeyType="next"
                     blurOnSubmit={false}
                     onSubmitEditing={() => usernameRef.current?.focus()}
+                    accessibilityLabel="Nome e cognome"
                   />
 
                   <View style={styles.labelRow}>
@@ -239,12 +251,15 @@ export default function RegisterScreen({ navigation }: any) {
                     onChangeText={setUsername}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    autoComplete="username"
+                    textContentType="username"
                     placeholder="mariorossi"
                     placeholderTextColor={theme.colors.muted}
                     style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
                     returnKeyType="next"
                     blurOnSubmit={false}
                     onSubmitEditing={() => emailRef.current?.focus()}
+                    accessibilityLabel="Username"
                   />
 
                   <View style={styles.labelRow}>
@@ -257,12 +272,15 @@ export default function RegisterScreen({ navigation }: any) {
                     onChangeText={setEmail}
                     autoCapitalize="none"
                     keyboardType="email-address"
+                    autoComplete="email"
+                    textContentType="emailAddress"
                     placeholder="nome@esempio.com"
                     placeholderTextColor={theme.colors.muted}
                     style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
                     returnKeyType="next"
                     blurOnSubmit={false}
                     onSubmitEditing={() => phoneRef.current?.focus()}
+                    accessibilityLabel="Email"
                   />
 
                   <View style={styles.labelRow}>
@@ -283,6 +301,9 @@ export default function RegisterScreen({ navigation }: any) {
                             },
                           ]}
                           onPress={() => setGender(option.value)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
+                          accessibilityLabel={`Seleziona ${option.label}`}
                         >
                           <Text style={{ color: selected ? theme.colors.primary : theme.colors.text, fontWeight: "700" }}>
                             {option.label}
@@ -324,6 +345,8 @@ export default function RegisterScreen({ navigation }: any) {
                       value={phone}
                       onChangeText={(text) => setPhone(digitsOnly(text))}
                       keyboardType="number-pad"
+                      autoComplete="tel"
+                      textContentType="telephoneNumber"
                       placeholder="3331234567"
                       placeholderTextColor={theme.colors.muted}
                       style={[
@@ -337,6 +360,7 @@ export default function RegisterScreen({ navigation }: any) {
                       returnKeyType="next"
                       blurOnSubmit={false}
                       onSubmitEditing={() => passwordRef.current?.focus()}
+                      accessibilityLabel="Telefono"
                     />
                   </View>
 
@@ -347,6 +371,8 @@ export default function RegisterScreen({ navigation }: any) {
                   <TouchableOpacity
                     onPress={openBirthDatePicker}
                     activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Seleziona data di nascita"
                     style={[
                       styles.datePickerButton,
                       { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
@@ -387,6 +413,8 @@ export default function RegisterScreen({ navigation }: any) {
                     <TouchableOpacity
                       onPress={() => setSecure((s) => !s)}
                       style={[styles.eyeButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={secure ? "Mostra password" : "Nascondi password"}
                     >
                       <Feather name={secure ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
                     </TouchableOpacity>
@@ -395,12 +423,15 @@ export default function RegisterScreen({ navigation }: any) {
                       value={password}
                       onChangeText={setPassword}
                       secureTextEntry={secure}
+                      autoComplete="password-new"
+                      textContentType="newPassword"
                       placeholder="Almeno 6 caratteri"
                       placeholderTextColor={theme.colors.muted}
                       style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
                       returnKeyType="next"
                       blurOnSubmit={false}
                       onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+                      accessibilityLabel="Password"
                     />
                   </View>
 
@@ -412,6 +443,8 @@ export default function RegisterScreen({ navigation }: any) {
                     <TouchableOpacity
                       onPress={() => setSecureConfirm((s) => !s)}
                       style={[styles.eyeButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={secureConfirm ? "Mostra conferma password" : "Nascondi conferma password"}
                     >
                       <Feather name={secureConfirm ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
                     </TouchableOpacity>
@@ -420,11 +453,14 @@ export default function RegisterScreen({ navigation }: any) {
                       value={confirmPassword}
                       onChangeText={setConfirmPassword}
                       secureTextEntry={secureConfirm}
+                      autoComplete="password-new"
+                      textContentType="newPassword"
                       placeholder="Ripeti la password"
                       placeholderTextColor={theme.colors.muted}
                       style={[styles.input, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
                       returnKeyType="done"
                       onSubmitEditing={handleRegister}
+                      accessibilityLabel="Conferma password"
                     />
                   </View>
                 </View>
@@ -439,14 +475,17 @@ export default function RegisterScreen({ navigation }: any) {
                 onPress={handleRegister}
                 disabled={!canSubmit || isSubmitting}
                 isLoading={isSubmitting}
+                accessibilityHint="Crea il tuo account cliente"
               />
 
-              <View style={styles.footerRow}>
-                <Text style={[styles.footerText, { color: theme.colors.muted }]}>Hai già un account?</Text>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
-                  <Text style={[styles.footerAction, { color: theme.colors.primary }]}> Accedi</Text>
-                </TouchableOpacity>
-              </View>
+              {canShowLoginActions ? (
+                <View style={styles.footerRow}>
+                  <Text style={[styles.footerText, { color: theme.colors.muted }]}>Hai già un account?</Text>
+                  <TouchableOpacity onPress={() => navigation.goBack()}>
+                    <Text style={[styles.footerAction, { color: theme.colors.primary }]}> Accedi</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
             </View>
           )}
 

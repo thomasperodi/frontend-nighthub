@@ -663,7 +663,7 @@ export default function OnboardingScreen({ navigation }: any) {
       return;
     }
 
-    navigation.replace("Login");
+    navigation.replace("Register", { firstLaunch: true });
   };
 
   const goNext = async () => {

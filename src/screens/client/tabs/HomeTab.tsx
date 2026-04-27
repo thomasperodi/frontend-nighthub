@@ -6,28 +6,30 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import FilterModal from "../../../components/FilterModal";
+import SearchBar from "../../../components/SearchBar";
 import { useTheme } from "../../../theme/ThemeProvider";
 import { useEvents } from "../../../hooks/useEvents";
 import { usePromos } from "../../../hooks/usePromos";
 import { useVenues } from "../../../hooks/useVenues";
 import { useAuth } from "../../../providers/AuthProvider";
 import type { Event as ApiEvent, Promo as ApiPromo, Venue as ApiVenue } from "../../../types/events";
+import type { HomeFilters } from "../../../types/ui";
 import { resolveEventImageUri } from "../../../utils/media";
 
 interface HomeTabProps {
   query: string;
   onQueryChange: (q: string) => void;
-  filters: any;
+  filters: HomeFilters;
   userPromos: string[];
   promoFilter: string | null;
   onPromoFilterChange: (id: string | null) => void;
-  onFiltersChange: (f: any) => void;
+  onFiltersChange: React.Dispatch<React.SetStateAction<HomeFilters>>;
   onEventPress: (item: any) => void;
   onPromoPress: (promo: any) => void;
   onToggleTheme: () => void;
@@ -50,6 +52,7 @@ export default function HomeTab({
   const { theme } = useTheme();
   const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -75,7 +78,6 @@ export default function HomeTab({
   const {
     data: promosData,
     loading: promosLoading,
-    error: promosError,
     refetch: refetchPromos,
   } = usePromos();
 
@@ -309,9 +311,18 @@ export default function HomeTab({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const selectedCategories = new Set(filters.categories.map((category) => category.toLowerCase()));
+    const selectedPromoTypes = new Set(filters.promoTypes.map((promoType) => promoType.toLowerCase()));
+
     let list = eventsUi.filter((e) => {
-      if (filters.categories.length && !filters.categories.some((c: string) => e.tags.includes(c))) return false;
+      if (selectedCategories.size > 0) {
+        const eventTags = new Set(e.tags.map((tag) => tag.toLowerCase()));
+        const hasMatchingCategory = Array.from(selectedCategories).some((category) => eventTags.has(category));
+        if (!hasMatchingCategory) return false;
+      }
+
       if (!q) return true;
+
       return (
         e.title.toLowerCase().includes(q) ||
         e.venue.toLowerCase().includes(q) ||
@@ -328,17 +339,14 @@ export default function HomeTab({
       list = list.filter((e) => e.promos && e.promos.some((p: any) => userSet.has(p.id)));
     }
 
-    if (filters.promoTypes && filters.promoTypes.length && hasPromos) {
-      const typeSet = new Set(filters.promoTypes);
-      list = list.filter((e) => e.promos && e.promos.some((p: any) => typeSet.has(p.title)));
+    if (selectedPromoTypes.size > 0 && hasPromos) {
+      list = list.filter((e) =>
+        e.promos && e.promos.some((p: any) => selectedPromoTypes.has(String(p.title ?? "").toLowerCase())),
+      );
     }
+
     return list;
   }, [query, filters, promoFilter, userPromos, eventsUi, hasPromos]);
-
-  const tonightEvents = useMemo(
-    () => filtered.filter((event) => event._raw && isEventTonight(event._raw)),
-    [filtered],
-  );
 
   const dbFeaturedEvents = useMemo(
     () => filtered.filter((event) => Boolean((event._raw as any)?.is_featured)),
@@ -355,6 +363,34 @@ export default function HomeTab({
     [promosUi, userPromoSet],
   );
   const topPromoChips = sortedPromos.slice(0, 8);
+
+  const availableCategories = useMemo(() => {
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const event of eventsUi) {
+      for (const tag of event.tags) {
+        const normalized = String(tag).trim();
+        const key = normalized.toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        ordered.push(normalized);
+      }
+    }
+    return ordered.sort((left, right) => left.localeCompare(right, "it"));
+  }, [eventsUi]);
+
+  const availablePromoTypes = useMemo(() => {
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const promo of promosUi) {
+      const normalized = String(promo.title).trim();
+      const key = normalized.toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      ordered.push(normalized);
+    }
+    return ordered.sort((left, right) => left.localeCompare(right, "it"));
+  }, [promosUi]);
 
   const displayName = useMemo(() => {
     const raw = (user as any)?.name || (user as any)?.username || user?.email?.split('@')[0] || 'Guest';
@@ -545,23 +581,26 @@ export default function HomeTab({
           </View>
 
           <View style={styles.headerActions}>
-            <TouchableOpacity activeOpacity={0.8} onPress={onToggleTheme} style={[styles.headerIconButton, { backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)", borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(12,12,12,0.08)" }]}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={onToggleTheme}
+              accessibilityRole="button"
+              accessibilityLabel={isDark ? "Passa al tema chiaro" : "Passa al tema scuro"}
+              style={[styles.headerIconButton, { backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.82)", borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(12,12,12,0.08)" }]}
+            >
               <Feather name={isDark ? "moon" : "sun"} size={18} color={theme.colors.text} />
             </TouchableOpacity>
           </View>
         </View>
 
         <View style={styles.searchRow}>
-          <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.82)", borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(12,12,12,0.08)" }]}>
-            <Feather name="search" size={18} color={theme.colors.muted} />
-            <TextInput
-              value={query}
-              onChangeText={onQueryChange}
-              placeholder="Cerca eventi, locali o artisti..."
-              placeholderTextColor={isDark ? "rgba(255,255,255,0.38)" : "rgba(11,11,11,0.35)"}
-              style={[styles.searchInput, { color: theme.colors.text }]}
-            />
-          </View>
+          <SearchBar
+            value={query}
+            onChange={onQueryChange}
+            onOpenFilters={() => setFilterModalVisible(true)}
+            placeholder="Cerca eventi, locali o artisti..."
+            activeFilterCount={activeFilterCount}
+          />
         </View>
 
         <View style={styles.filtersHeadingRow}>
@@ -584,7 +623,7 @@ export default function HomeTab({
           {userPromos.length > 0 ? (
             <TouchableOpacity
               activeOpacity={0.82}
-              onPress={() => onFiltersChange((prev: any) => ({ ...prev, onlyMyPromos: !prev.onlyMyPromos }))}
+              onPress={() => onFiltersChange((prev) => ({ ...prev, onlyMyPromos: !prev.onlyMyPromos }))}
               style={[styles.chipButton, filters.onlyMyPromos ? styles.chipButtonActive : null, { borderColor: filters.onlyMyPromos ? theme.colors.primary + "66" : isDark ? "rgba(255,255,255,0.08)" : "rgba(12,12,12,0.08)", backgroundColor: filters.onlyMyPromos ? theme.colors.primary + "22" : isDark ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.78)" }]}
             >
               <Feather name="star" size={15} color={filters.onlyMyPromos ? theme.colors.primary : theme.colors.muted} />
@@ -681,6 +720,16 @@ export default function HomeTab({
           </View>
         ) : null}
       </ScrollView>
+
+      <FilterModal
+        visible={filterModalVisible}
+        onClose={() => setFilterModalVisible(false)}
+        onApply={(nextFilters) => onFiltersChange(nextFilters)}
+        initial={filters}
+        categories={availableCategories}
+        promoTypes={availablePromoTypes}
+        enablePromoFilters={hasPromos}
+      />
     </View>
   );
 }

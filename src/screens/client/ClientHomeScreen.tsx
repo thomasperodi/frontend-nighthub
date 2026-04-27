@@ -9,6 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import BottomNav, { NavItem } from "../../components/BottomNav";
 import { listFriendRequests } from "../../services/friends";
 import { listIncomingTableInvitations } from "../../services/reservations";
+import type { HomeFilters } from "../../types/ui";
 
 // Importar os novos componentes
 import HomeTab from "./tabs/HomeTab";
@@ -21,7 +22,7 @@ export default function ClientHomeScreen({ route }: any) {
   const navigation: any = useNavigation();
 
   const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState({ categories: [] as string[], onlyMyPromos: false, promoTypes: [] as string[] });
+  const [filters, setFilters] = useState<HomeFilters>({ categories: [], onlyMyPromos: false, promoTypes: [] });
   const [currentTab, setCurrentTab] = useState("home");
   const [promoFilter, setPromoFilter] = useState<string | null>(null);
   const [userPromos, setUserPromos] = useState<string[]>([]);

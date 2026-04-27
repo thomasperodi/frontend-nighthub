@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Linking,
   RefreshControl,
   ScrollView,
   Share,
@@ -43,6 +42,16 @@ type MemberStats = {
   entries: number;
   tables: number;
   revenue: number;
+};
+
+type MemberPerformance = {
+  member: NetworkMember;
+  reservations: number;
+  guests: number;
+  teamGuests: number;
+  revenue: number;
+  confirmedRate: number;
+  avgRevenue: number;
 };
 
 type Props = {
@@ -96,6 +105,11 @@ function toMoney(value: number) {
   return `EUR ${value.toFixed(2)}`;
 }
 
+function toPercent(value: number) {
+  if (!Number.isFinite(value)) return "0%";
+  return `${value.toFixed(1)}%`;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -136,6 +150,17 @@ function normalizeSearchText(value: string | null | undefined) {
   return String(value ?? "").trim().toLocaleLowerCase("it");
 }
 
+function getReservationEventId(reservation: Reservation) {
+  const direct = typeof reservation.event_id === "string" ? reservation.event_id.trim() : "";
+  if (direct.length) return direct;
+
+  const nested = typeof reservation.event?.id === "string" ? reservation.event.id.trim() : "";
+  if (nested.length) return nested;
+
+  const meta = asRecord(reservation.meta ?? null);
+  return readString(meta, "event_id");
+}
+
 export default function VenuePrNetworkTab({
   venueId,
   canManageTeam = true,
@@ -166,6 +191,7 @@ export default function VenuePrNetworkTab({
   const userSearchRequestRef = useRef(0);
 
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [memberGiftEventById, setMemberGiftEventById] = useState<Record<string, string>>({});
 
   const effectiveManagementScope = useMemo(() => {
     if (!canManageTeam) return "none" as const;
@@ -186,6 +212,43 @@ export default function VenuePrNetworkTab({
     () => venueUsers.find((candidate) => candidate.id === selectedUserId) ?? null,
     [venueUsers, selectedUserId],
   );
+
+  const eventById = useMemo(() => {
+    const map = new Map<string, Event>();
+    for (const event of venueEvents) map.set(event.id, event);
+    return map;
+  }, [venueEvents]);
+
+  const fallbackMemberEventId = selectedEventId ?? venueEvents[0]?.id ?? null;
+
+  const analyticsReservations = useMemo(() => {
+    if (!selectedEventId) return reservations;
+    return reservations.filter((reservation) => getReservationEventId(reservation) === selectedEventId);
+  }, [reservations, selectedEventId]);
+
+  useEffect(() => {
+    const validEventIds = new Set(venueEvents.map((event) => event.id));
+    const validMemberIds = new Set(members.map((member) => member.id));
+
+    setMemberGiftEventById((current) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+
+      for (const [memberId, eventId] of Object.entries(current)) {
+        if (!validMemberIds.has(memberId)) {
+          changed = true;
+          continue;
+        }
+        if (!validEventIds.has(eventId)) {
+          changed = true;
+          continue;
+        }
+        next[memberId] = eventId;
+      }
+
+      return changed ? next : current;
+    });
+  }, [members, venueEvents]);
 
   const loadMembers = useCallback(async () => {
     if (!venueId) {
@@ -339,7 +402,7 @@ export default function VenuePrNetworkTab({
       });
     }
 
-    for (const reservation of reservations) {
+    for (const reservation of analyticsReservations) {
       const meta = asRecord(reservation.meta ?? null);
       const inviterUserId = readString(meta, "inviter_user_id");
       const trackingCode =
@@ -374,7 +437,7 @@ export default function VenuePrNetworkTab({
     }
 
     return map;
-  }, [membersInScope, reservations]);
+  }, [analyticsReservations, membersInScope]);
 
   const childrenByMember = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -417,7 +480,7 @@ export default function VenuePrNetworkTab({
       unassigned: 0,
     };
 
-    for (const reservation of reservations) {
+    for (const reservation of analyticsReservations) {
       const meta = asRecord(reservation.meta ?? null);
       const inviterUserId = readString(meta, "inviter_user_id");
       const trackingCode =
@@ -449,7 +512,55 @@ export default function VenuePrNetworkTab({
     }
 
     return totals;
-  }, [membersInScope, reservations]);
+  }, [analyticsReservations, membersInScope]);
+
+  const analyticsPerformance = useMemo(() => {
+    return membersInScope
+      .map<MemberPerformance>((member) => {
+        const own = statsByMember.get(member.id);
+        const reservationsCount = own?.reservations ?? 0;
+        const confirmedCount = own?.confirmed ?? 0;
+        const revenue = own?.revenue ?? 0;
+        return {
+          member,
+          reservations: reservationsCount,
+          guests: own?.guests ?? 0,
+          teamGuests: teamGuestsByMember.get(member.id) ?? 0,
+          revenue,
+          confirmedRate: reservationsCount > 0 ? (confirmedCount / reservationsCount) * 100 : 0,
+          avgRevenue: reservationsCount > 0 ? revenue / reservationsCount : 0,
+        };
+      })
+      .sort((a, b) => b.revenue - a.revenue || b.reservations - a.reservations || b.teamGuests - a.teamGuests);
+  }, [membersInScope, statsByMember, teamGuestsByMember]);
+
+  const analyticsTopByRevenue = analyticsPerformance[0] ?? null;
+
+  const analyticsTopByReservations = useMemo(() => {
+    return (
+      [...analyticsPerformance].sort(
+        (a, b) => b.reservations - a.reservations || b.revenue - a.revenue || b.teamGuests - a.teamGuests,
+      )[0] ?? null
+    );
+  }, [analyticsPerformance]);
+
+  const analyticsTopByGuests = useMemo(() => {
+    return (
+      [...analyticsPerformance].sort(
+        (a, b) => b.teamGuests - a.teamGuests || b.revenue - a.revenue || b.reservations - a.reservations,
+      )[0] ?? null
+    );
+  }, [analyticsPerformance]);
+
+  const analyticsConfirmationRate =
+    globalStats.trackedReservations > 0
+      ? (globalStats.confirmed / globalStats.trackedReservations) * 100
+      : 0;
+
+  const analyticsAvgRevenuePerReservation =
+    globalStats.trackedReservations > 0
+      ? globalStats.trackedRevenue / globalStats.trackedReservations
+      : 0;
 
   const topMember = useMemo(() => {
     const ranked = membersInScope
@@ -581,69 +692,33 @@ export default function VenuePrNetworkTab({
     );
   };
 
-  const shareTrackedLink = async (member: NetworkMember) => {
-    if (!selectedEventId) {
-      Alert.alert("Seleziona evento", "Scegli un evento per generare il link tracciato.");
+  const shareTrackedLink = async (member: NetworkMember, eventId: string | null) => {
+    if (!eventId) {
+      Alert.alert("Seleziona evento", "Scegli una serata per generare il link omaggio tracciato.");
       return;
     }
 
     const links = buildTrackedEventLinks({
-      eventId: selectedEventId,
+      eventId,
       refCode: member.refCode,
     });
 
-    const eventName = selectedEvent?.name ?? "serata";
+    const eventName = eventById.get(eventId)?.name ?? "serata";
 
     try {
       await Share.share({
         title: "Invito NightHub",
         message:
-          `${member.name} ti invita a ${eventName}.\n\n` +
-          `Apri app o store (smart link):\n${links.smartUrl}\n\n` +
+          `${member.name} ti mette in omaggio per ${eventName}.\n\n` +
+          `Smart link tracciato:\n${links.smartUrl}\n\n` +
           `Link web tracciato:\n${links.webUrl}\n\n` +
-          `Deep link diretto app:\n${links.appDeepLink}\n\n` +
-          `Wallet Apple:\n${links.appleWalletUrl}\n\n` +
-          `Wallet Google:\n${links.googleWalletUrl}`,
+          `Deep link diretto app:\n${links.appDeepLink}`,
         url: links.smartUrl,
       });
     } catch {
       Alert.alert("Errore", "Non riesco a condividere il link in questo momento.");
     }
   };
-
-  const openWalletLink = useCallback(
-    async (member: NetworkMember, provider: "apple" | "google") => {
-      if (!selectedEventId) {
-        Alert.alert("Seleziona evento", "Scegli un evento prima di aprire il wallet link.");
-        return;
-      }
-
-      const links = buildTrackedEventLinks({
-        eventId: selectedEventId,
-        refCode: member.refCode,
-        wallet: provider,
-      });
-
-      const targetUrl = provider === "apple" ? links.appleWalletUrl : links.googleWalletUrl;
-
-      try {
-        const supported = await Linking.canOpenURL(targetUrl);
-        if (supported) {
-          await Linking.openURL(targetUrl);
-          return;
-        }
-      } catch {
-        // fallback below
-      }
-
-      try {
-        await Linking.openURL(links.smartUrl);
-      } catch {
-        Alert.alert("Errore", "Non riesco ad aprire il link wallet in questo momento.");
-      }
-    },
-    [selectedEventId],
-  );
 
   const userCandidates = useMemo(() => {
     const query = normalizeSearchText(userSearch);
@@ -738,7 +813,7 @@ export default function VenuePrNetworkTab({
       <View style={[styles.hero, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
         <Text style={[styles.heroEyebrow, { color: theme.colors.muted }]}>PR network</Text>
         <Text style={[styles.heroTitle, { color: theme.colors.text }]}>Struttura locale: Responsabili PR e team</Text>
-        <Text style={[styles.heroSubtitle, { color: theme.colors.muted }]}>Gestione account a livello locale. L'evento serve solo per KPI, link e QR tracciati.</Text>
+        <Text style={[styles.heroSubtitle, { color: theme.colors.muted }]}>Gestione account a livello locale: responsabili e PR restano validi su tutti gli eventi del locale.</Text>
 
         <View style={[styles.hierarchyCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
           <Text style={[styles.hierarchyTitle, { color: theme.colors.text }]}>Flusso gerarchico</Text>
@@ -748,7 +823,7 @@ export default function VenuePrNetworkTab({
               ? "Modalita locale: qui puoi aggiungere solo Responsabili PR."
               : isManagerManagement
                 ? "Modalita responsabile: qui puoi aggiungere PR sotto il tuo team."
-                : "Modalita sola lettura: puoi monitorare risultati e link tracciati."}
+                : "Modalita sola lettura: puoi monitorare risultati e QR omaggio tracciati."}
           </Text>
         </View>
 
@@ -761,8 +836,8 @@ export default function VenuePrNetworkTab({
       </View>
 
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Evento per tracking</Text>
-        <Text style={[styles.mutedText, { color: theme.colors.muted }]}>La gerarchia team non dipende dall'evento selezionato.</Text>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Filtro analytics</Text>
+        <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Questo filtro non cambia i permessi del team: serve solo a leggere KPI e ranking per serata.</Text>
 
         {venueEvents.length ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventChipsRow}>
@@ -795,12 +870,12 @@ export default function VenuePrNetworkTab({
         {selectedEvent ? (
           <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Evento attivo: {selectedEvent.name}</Text>
         ) : (
-          <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Seleziona un evento per attivare link, QR e wallet.</Text>
+          <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Seleziona una serata per vedere analytics dedicati.</Text>
         )}
 
 
         {!venueEvents.length && (
-          <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Nessun evento disponibile. Crea un evento prima di aprire il tracking PR.</Text>
+          <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Nessun evento disponibile. Crea una serata per attivare analytics e QR omaggio.</Text>
         )}
       </View>
 
@@ -824,6 +899,79 @@ export default function VenuePrNetworkTab({
           <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Aggiornamento dati prenotazioni in corso...</Text>
         </View>
       ) : null}
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Analytics performance PR</Text>
+        <Text style={[styles.mutedText, { color: theme.colors.muted }]}>
+          {selectedEvent
+            ? `Classifica vendite e conversione su ${selectedEvent.name}.`
+            : "Classifica vendite e conversione aggregata su tutte le prenotazioni disponibili."}
+        </Text>
+
+        <View style={styles.metricGrid}>
+          <MetricCard label="Tasso conferma" value={toPercent(analyticsConfirmationRate)} tone="#53D3A4" />
+          <MetricCard
+            label="Scontrino medio"
+            value={toMoney(analyticsAvgRevenuePerReservation)}
+            tone="#F28C28"
+          />
+          <MetricCard label="Pending" value={String(globalStats.pending)} tone="#F4C95D" />
+          <MetricCard label="Lead non assegnati" value={String(globalStats.unassigned)} tone="#FF6B6B" />
+        </View>
+
+        {analyticsPerformance.length ? (
+          <View style={[styles.analyticsCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+            <Text style={[styles.analyticsTitle, { color: theme.colors.text }]}>Top venditori</Text>
+            <View style={styles.analyticsSummaryRow}>
+              <AnalyticsSummaryPill
+                label="Top revenue"
+                value={analyticsTopByRevenue ? `${analyticsTopByRevenue.member.name} • ${toMoney(analyticsTopByRevenue.revenue)}` : "-"}
+                tone="#67B7FF"
+              />
+              <AnalyticsSummaryPill
+                label="Top prenotazioni"
+                value={analyticsTopByReservations ? `${analyticsTopByReservations.member.name} • ${analyticsTopByReservations.reservations}` : "-"}
+                tone="#7EE081"
+              />
+              <AnalyticsSummaryPill
+                label="Top ospiti"
+                value={analyticsTopByGuests ? `${analyticsTopByGuests.member.name} • ${analyticsTopByGuests.teamGuests}` : "-"}
+                tone="#F4C95D"
+              />
+            </View>
+
+            <View style={styles.analyticsRankList}>
+              {analyticsPerformance.slice(0, 8).map((row, index) => (
+                <View
+                  key={row.member.id}
+                  style={[styles.analyticsRankRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}
+                >
+                  <View style={[styles.analyticsRankBadge, { backgroundColor: `${theme.colors.primary}20` }]}>
+                    <Text style={[styles.analyticsRankBadgeText, { color: theme.colors.primary }]}>#{index + 1}</Text>
+                  </View>
+                  <View style={styles.analyticsRankMain}>
+                    <Text style={[styles.analyticsRankName, { color: theme.colors.text }]} numberOfLines={1}>
+                      {row.member.name}
+                    </Text>
+                    <Text style={[styles.analyticsRankSub, { color: theme.colors.muted }]} numberOfLines={1}>
+                      {ROLE_LABEL[row.member.role]} • {row.reservations} prenotazioni • {row.guests} ospiti diretti
+                    </Text>
+                  </View>
+                  <View style={styles.analyticsRankStats}>
+                    <Text style={[styles.analyticsRankValue, { color: theme.colors.text }]}>{toMoney(row.revenue)}</Text>
+                    <Text style={[styles.analyticsRankMeta, { color: theme.colors.muted }]}>CR {toPercent(row.confirmedRate)}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.emptyCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+            <Feather name="bar-chart-2" size={18} color={theme.colors.muted} />
+            <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Nessun dato utile per generare analytics al momento.</Text>
+          </View>
+        )}
+      </View>
 
       {canCreateMembers ? (
         <View style={styles.section}>
@@ -975,13 +1123,17 @@ export default function VenuePrNetworkTab({
         {topMember ? (
           <View style={[styles.topCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
             <Text style={[styles.topLabel, { color: theme.colors.muted }]}>
-              {isManagerManagement ? "Top performer del tuo team" : "Top performer evento"}
+              {isManagerManagement
+                ? "Top performer del tuo team"
+                : selectedEvent
+                  ? "Top performer evento"
+                  : "Top performer locale"}
             </Text>
             <Text style={[styles.topName, { color: theme.colors.text }]}>{topMember.member.name}</Text>
             <Text style={[styles.topValue, { color: theme.colors.primary }]}>{topMember.guests} ospiti totali di squadra</Text>
           </View>
         ) : (
-          <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Nessun dato ancora disponibile per questo evento.</Text>
+          <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Nessun dato ancora disponibile per questa selezione analytics.</Text>
         )}
 
         {orderedMembers.map((member) => {
@@ -991,8 +1143,11 @@ export default function VenuePrNetworkTab({
             ? members.find((candidate) => candidate.id === member.parentId) ?? null
             : null;
 
-          const trackedLinks = selectedEventId
-            ? buildTrackedEventLinks({ eventId: selectedEventId, refCode: member.refCode })
+          const giftEventId = memberGiftEventById[member.id] ?? fallbackMemberEventId;
+          const giftEvent = giftEventId ? eventById.get(giftEventId) ?? null : null;
+
+          const trackedLinks = giftEventId
+            ? buildTrackedEventLinks({ eventId: giftEventId, refCode: member.refCode })
             : null;
 
           const trackedLink = trackedLinks?.smartUrl ?? null;
@@ -1037,19 +1192,63 @@ export default function VenuePrNetworkTab({
                 <SmallStat label="Revenue" value={toMoney(ownStats?.revenue ?? 0)} />
               </View>
 
+              <View style={[styles.memberEventCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
+                <Text style={[styles.memberEventTitle, { color: theme.colors.text }]}>Serata omaggio del PR</Text>
+                <Text style={[styles.memberEventSub, { color: theme.colors.muted }]}>Responsabili e PR possono promuovere qualsiasi evento del locale.</Text>
+
+                {venueEvents.length ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventChipsRow}>
+                    {venueEvents.map((event) => {
+                      const active = giftEventId === event.id;
+                      return (
+                        <TouchableOpacity
+                          key={`${member.id}-${event.id}`}
+                          style={[
+                            styles.eventChip,
+                            {
+                              borderColor: active ? theme.colors.primary : theme.colors.border,
+                              backgroundColor: active ? `${theme.colors.primary}20` : theme.colors.surface,
+                            },
+                          ]}
+                          onPress={() => {
+                            setMemberGiftEventById((current) => ({
+                              ...current,
+                              [member.id]: event.id,
+                            }));
+                          }}
+                        >
+                          <Text
+                            style={[styles.eventChipText, { color: active ? theme.colors.primary : theme.colors.text }]}
+                            numberOfLines={1}
+                          >
+                            {event.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                ) : (
+                  <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Nessuna serata disponibile per generare il QR omaggio.</Text>
+                )}
+
+                {giftEvent ? (
+                  <Text style={[styles.memberEventActive, { color: theme.colors.primary }]}>Serata attiva: {giftEvent.name}</Text>
+                ) : null}
+              </View>
+
               {qrUrl ? (
                 <View style={[styles.qrWrap, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
                   <Image source={{ uri: qrUrl }} style={styles.qrImage} />
                   <View style={styles.qrTextWrap}>
-                    <Text style={[styles.qrTitle, { color: theme.colors.text }]}>QR link tracciato</Text>
-                    <Text style={[styles.qrSub, { color: theme.colors.muted }]}>Condividi questo QR o il link per attribuire la prenotazione al PR.</Text>
+                    <Text style={[styles.qrTitle, { color: theme.colors.text }]}>QR omaggio tracciato</Text>
+                    <Text style={[styles.qrSub, { color: theme.colors.muted }]}>Condividi questo QR per associare l'omaggio e tracciare vendite e conversione del PR.</Text>
                     <Text style={[styles.linkPreview, { color: theme.colors.primary }]} numberOfLines={2}>
                       {trackedLink}
                     </Text>
                   </View>
                 </View>
               ) : (
-                <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Seleziona un evento per generare link e QR.</Text>
+                <Text style={[styles.mutedText, { color: theme.colors.muted }]}>Seleziona una serata per generare QR e link omaggio.</Text>
               )}
 
               <View style={styles.memberActionsRow}>
@@ -1059,46 +1258,14 @@ export default function VenuePrNetworkTab({
                     {
                       borderColor: theme.colors.border,
                       backgroundColor: theme.colors.card,
-                      opacity: mutationLoading || !selectedEventId ? 0.6 : 1,
+                      opacity: mutationLoading || !giftEventId ? 0.6 : 1,
                     },
                   ]}
-                  onPress={() => void shareTrackedLink(member)}
-                  disabled={mutationLoading || !selectedEventId}
+                  onPress={() => void shareTrackedLink(member, giftEventId)}
+                  disabled={mutationLoading || !giftEventId}
                 >
                   <Feather name="share-2" size={15} color={theme.colors.text} />
-                  <Text style={[styles.actionBtnText, { color: theme.colors.text }]}>Condividi</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.actionBtn,
-                    {
-                      borderColor: theme.colors.border,
-                      backgroundColor: theme.colors.card,
-                      opacity: mutationLoading || !selectedEventId ? 0.6 : 1,
-                    },
-                  ]}
-                  onPress={() => void openWalletLink(member, "apple")}
-                  disabled={mutationLoading || !selectedEventId}
-                >
-                  <Feather name="credit-card" size={15} color={theme.colors.text} />
-                  <Text style={[styles.actionBtnText, { color: theme.colors.text }]}>Wallet Apple</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.actionBtn,
-                    {
-                      borderColor: theme.colors.border,
-                      backgroundColor: theme.colors.card,
-                      opacity: mutationLoading || !selectedEventId ? 0.6 : 1,
-                    },
-                  ]}
-                  onPress={() => void openWalletLink(member, "google")}
-                  disabled={mutationLoading || !selectedEventId}
-                >
-                  <Feather name="smartphone" size={15} color={theme.colors.text} />
-                  <Text style={[styles.actionBtnText, { color: theme.colors.text }]}>Wallet Google</Text>
+                  <Text style={[styles.actionBtnText, { color: theme.colors.text }]}>Condividi omaggio</Text>
                 </TouchableOpacity>
 
                 {canManageMember(member) ? (
@@ -1160,8 +1327,8 @@ export default function VenuePrNetworkTab({
       </View>
 
       <View style={[styles.infoCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-        <Text style={[styles.infoTitle, { color: theme.colors.text }]}>Wallet e omaggi</Text>
-        <Text style={[styles.infoText, { color: theme.colors.muted }]}>Ogni membro ha smart link, deep link, QR e link wallet Apple/Google con tracking PR. Lo smart link prova ad aprire l'app e in fallback porta allo store.</Text>
+        <Text style={[styles.infoTitle, { color: theme.colors.text }]}>QR omaggio e tracking vendite</Text>
+        <Text style={[styles.infoText, { color: theme.colors.muted }]}>Ogni PR puo selezionare la serata da promuovere e usare QR/smart link omaggio con tracking automatico su prenotazioni, ospiti e revenue.</Text>
       </View>
 
       {mutationLoading ? (
@@ -1178,6 +1345,25 @@ export default function VenuePrNetworkTab({
       <View style={[styles.metricCard, { borderColor: `${tone}55`, backgroundColor: `${tone}18` }]}>
         <Text style={[styles.metricLabel, { color: tone }]}>{label}</Text>
         <Text style={[styles.metricValue, { color: theme.colors.text }]}>{value}</Text>
+      </View>
+    );
+  }
+
+  function AnalyticsSummaryPill({
+    label,
+    value,
+    tone,
+  }: {
+    label: string;
+    value: string;
+    tone: string;
+  }) {
+    return (
+      <View style={[styles.analyticsPill, { borderColor: `${tone}55`, backgroundColor: `${tone}15` }]}>
+        <Text style={[styles.analyticsPillLabel, { color: tone }]}>{label}</Text>
+        <Text style={[styles.analyticsPillValue, { color: theme.colors.text }]} numberOfLines={2}>
+          {value}
+        </Text>
       </View>
     );
   }
@@ -1272,6 +1458,83 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: 17,
     fontWeight: "900",
+  },
+  analyticsCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    gap: 10,
+  },
+  analyticsTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  analyticsSummaryRow: {
+    gap: 8,
+  },
+  analyticsPill: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 4,
+  },
+  analyticsPillLabel: {
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    fontWeight: "800",
+  },
+  analyticsPillValue: {
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 16,
+  },
+  analyticsRankList: {
+    gap: 8,
+  },
+  analyticsRankRow: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  analyticsRankBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  analyticsRankBadgeText: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  analyticsRankMain: {
+    flex: 1,
+    gap: 2,
+  },
+  analyticsRankName: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  analyticsRankSub: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  analyticsRankStats: {
+    alignItems: "flex-end",
+    gap: 2,
+  },
+  analyticsRankValue: {
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  analyticsRankMeta: {
+    fontSize: 10,
+    fontWeight: "700",
   },
   section: {
     gap: 10,
@@ -1487,6 +1750,26 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
+  },
+  memberEventCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 7,
+  },
+  memberEventTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  memberEventSub: {
+    fontSize: 11,
+    fontWeight: "600",
+    lineHeight: 15,
+  },
+  memberEventActive: {
+    fontSize: 11,
+    fontWeight: "800",
   },
   smallStat: {
     minWidth: "46%",

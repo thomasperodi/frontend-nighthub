@@ -2,18 +2,53 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Modal, View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Pressable } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../theme/ThemeProvider";
+import type { HomeFilters } from "../types/ui";
 
-const CATEGORIES = ["Musica", "Dj set", "Live", "Latino", "Elettronica", "House"];
+type FilterModalProps = {
+  visible: boolean;
+  onClose: () => void;
+  onApply: (nextFilters: HomeFilters) => void;
+  initial: HomeFilters;
+  categories: string[];
+  promoTypes: string[];
+  enablePromoFilters?: boolean;
+};
 
-// derive promo types from events
-import { MOCK_EVENTS } from "../data/mockEvents";
-const PROMO_TYPES = Array.from(new Set(MOCK_EVENTS.flatMap(e => (e.promos || []).map((p:any) => p.title))));
+const normalize = (value: string) => value.trim().toLowerCase();
 
-export default function FilterModal({ visible, onClose, onApply, initial, enablePromoFilters = true }: any) {
+export default function FilterModal({
+  visible,
+  onClose,
+  onApply,
+  initial,
+  categories,
+  promoTypes: promoTypeOptions,
+  enablePromoFilters = true,
+}: FilterModalProps) {
   const { theme, isDark } = useTheme();
   const [selected, setSelected] = useState<string[]>(initial?.categories || []);
   const [onlyMyPromos, setOnlyMyPromos] = useState<boolean>(initial?.onlyMyPromos || false);
   const [promoTypes, setPromoTypes] = useState<string[]>(initial?.promoTypes || []);
+
+  const normalizedCategoryOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return categories.filter((item) => {
+      const key = normalize(item);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [categories]);
+
+  const normalizedPromoTypeOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return promoTypeOptions.filter((item) => {
+      const key = normalize(item);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [promoTypeOptions]);
 
   useEffect(() => {
     if (!visible) return;
@@ -45,9 +80,11 @@ export default function FilterModal({ visible, onClose, onApply, initial, enable
   };
 
   const hasActiveFilters = activeCount > 0;
+  const hasCategoryOptions = normalizedCategoryOptions.length > 0;
+  const hasPromoTypeOptions = normalizedPromoTypeOptions.length > 0;
 
   return (
-    <Modal visible={visible} transparent animationType="slide">
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={[styles.overlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.56)' : 'rgba(7,12,20,0.24)' }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
@@ -90,6 +127,7 @@ export default function FilterModal({ visible, onClose, onApply, initial, enable
             style={styles.content}
             contentContainerStyle={styles.contentContainer}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
             <View style={[styles.sectionCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(12,12,12,0.025)', borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(12,12,12,0.08)' }]}>
               <View style={styles.sectionHeader}>
@@ -103,22 +141,26 @@ export default function FilterModal({ visible, onClose, onApply, initial, enable
               </View>
 
               <View style={styles.chips}>
-              {CATEGORIES.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  activeOpacity={0.82}
-                  onPress={() => toggle(c)}
-                  style={[
-                    styles.chip,
-                    {
-                      borderColor: selected.includes(c) ? theme.colors.primary + '66' : theme.colors.border,
-                      backgroundColor: selected.includes(c) ? theme.colors.primary + '18' : isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF',
-                    },
-                  ]}
-                >
-                  <Text style={[styles.chipText, { color: theme.colors.text }]}>{c}</Text>
-                </TouchableOpacity>
-              ))}
+                {hasCategoryOptions ? normalizedCategoryOptions.map((category) => (
+                  <TouchableOpacity
+                    key={category}
+                    activeOpacity={0.82}
+                    onPress={() => toggle(category)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: selected.includes(category) }}
+                    style={[
+                      styles.chip,
+                      {
+                        borderColor: selected.includes(category) ? theme.colors.primary + '66' : theme.colors.border,
+                        backgroundColor: selected.includes(category) ? theme.colors.primary + '18' : isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF',
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.chipText, { color: theme.colors.text }]}>{category}</Text>
+                  </TouchableOpacity>
+                )) : (
+                  <Text style={[styles.emptyText, { color: theme.colors.muted }]}>Nessuna categoria disponibile con i dati correnti.</Text>
+                )}
               </View>
             </View>
 
@@ -145,20 +187,22 @@ export default function FilterModal({ visible, onClose, onApply, initial, enable
 
                   <Text style={[styles.fieldLabel, { color: theme.colors.muted }]}>Tipologia promo</Text>
                   <View style={styles.chips}>
-                    {PROMO_TYPES.length ? PROMO_TYPES.map((p) => (
+                    {hasPromoTypeOptions ? normalizedPromoTypeOptions.map((promoType) => (
                       <TouchableOpacity
-                        key={p}
+                        key={promoType}
                         activeOpacity={0.82}
-                        onPress={() => togglePromoType(p)}
+                        onPress={() => togglePromoType(promoType)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: promoTypes.includes(promoType) }}
                         style={[
                           styles.chip,
                           {
-                            borderColor: promoTypes.includes(p) ? theme.colors.primary + '66' : theme.colors.border,
-                            backgroundColor: promoTypes.includes(p) ? theme.colors.primary + '18' : isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF',
+                            borderColor: promoTypes.includes(promoType) ? theme.colors.primary + '66' : theme.colors.border,
+                            backgroundColor: promoTypes.includes(promoType) ? theme.colors.primary + '18' : isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF',
                           },
                         ]}
                       >
-                        <Text style={[styles.chipText, { color: theme.colors.text }]}>{p}</Text>
+                        <Text style={[styles.chipText, { color: theme.colors.text }]}>{promoType}</Text>
                       </TouchableOpacity>
                     )) : <Text style={[styles.emptyText, { color: theme.colors.muted }]}>Nessuna promozione disponibile negli eventi caricati.</Text>}
                   </View>

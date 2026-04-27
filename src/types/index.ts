@@ -4,6 +4,7 @@ export * from './events';
 export * from './reservations';
 export * from './users';
 export * from './tables';
+export * from './ui';
 
 // Common API response types
 export type ApiResponse<T> = {

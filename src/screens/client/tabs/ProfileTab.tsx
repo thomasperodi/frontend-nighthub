@@ -128,6 +128,9 @@ export default function ProfileTab({ navigation }: ProfileTabProps) {
       style={[styles.menuItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}
       onPress={item.onPress}
       activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={item.label}
+      accessibilityHint={item.description}
     >
       <View style={[styles.menuIconContainer, { backgroundColor: item.color + '22' }]}>
         <Feather name={item.icon} size={20} color={item.color} />
@@ -187,6 +190,9 @@ export default function ProfileTab({ navigation }: ProfileTabProps) {
           style={[styles.deleteButton, { borderColor: theme.colors.error + '44', backgroundColor: theme.colors.error + '10' }]}
           onPress={confirmDelete}
           activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Elimina account"
+          accessibilityHint="Azione irreversibile"
         >
           <Feather name="trash-2" size={18} color={theme.colors.error} />
           <Text style={[styles.deleteButtonText, { color: theme.colors.error }]}>Elimina account</Text>

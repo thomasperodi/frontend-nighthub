@@ -49,9 +49,11 @@ export default function BottomNav({ items, active, onChange }: BottomNavProps) {
                 isActive ? { backgroundColor: activeItemBackground, borderColor: theme.colors.primary + "66" } : null,
               ]}
               onPress={() => onChange?.(it.key)}
-              accessibilityRole="button"
+              accessibilityRole="tab"
               accessibilityState={{ selected: isActive }}
               accessibilityLabel={it.label}
+              accessibilityHint={it.badgeCount ? `${it.badgeCount} notifiche` : undefined}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               activeOpacity={0.7}
             >
               {isActive ? (

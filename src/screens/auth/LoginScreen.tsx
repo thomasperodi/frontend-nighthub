@@ -28,6 +28,7 @@ export default function LoginScreen({ navigation }: any) {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const canSubmit = /^\S+@\S+\.\S+$/.test(email.trim()) && password.length >= 6;
 
   const passwordRef = useRef<TextInput>(null);
 
@@ -89,51 +90,16 @@ export default function LoginScreen({ navigation }: any) {
           <ScrollView
             contentContainerStyle={[
               styles.scrollContent,
-              { paddingBottom: (insets.bottom || 0) + (keyboardVisible ? 28 : 170) },
+              { paddingBottom: (insets.bottom || 0) + (keyboardVisible ? 28 : 130) },
             ]}
-            keyboardShouldPersistTaps="always"
-            keyboardDismissMode="none"
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             contentInsetAdjustmentBehavior="always"
             showsVerticalScrollIndicator={false}
           >
               <View style={styles.heroArea}>
                 <Text style={[styles.title, { color: theme.colors.text }]}>Bentornato 👋</Text>
                 <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Se hai gia un account puoi entrare subito</Text>
-              </View>
-
-              <View style={[styles.valueCard, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-                <View style={styles.cardHeaderRow}>
-                  <View style={[styles.cardHeaderIcon, { backgroundColor: `${theme.colors.primary}18` }]}>
-                    <Feather name="user-plus" size={16} color={theme.colors.primary} />
-                  </View>
-                  <View style={styles.cardHeaderTextBlock}>
-                    <Text style={[styles.cardHeaderTitle, { color: theme.colors.text }]}>Primo accesso?</Text>
-                    <Text style={[styles.cardHeaderSubtitle, { color: theme.colors.muted }]}>Crea prima il tuo account cliente</Text>
-                  </View>
-                </View>
-
-                <View style={[styles.softDivider, { backgroundColor: theme.colors.border }]} />
-
-                <TouchableOpacity
-                  style={[styles.primaryActionButton, { backgroundColor: theme.colors.primary }]}
-                  onPress={() => navigation.navigate("Register")}
-                  accessibilityRole="button"
-                  accessibilityLabel="Crea account cliente"
-                >
-                  <Feather name="user-plus" size={16} color={theme.colors.text} />
-                  <Text style={[styles.primaryActionText, { color: theme.colors.text }]}>Crea account cliente</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.reviewOnboardingButton, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-                  onPress={() => navigation.navigate("Onboarding")}
-                  accessibilityRole="button"
-                  accessibilityLabel="Rivedi onboarding"
-                >
-                  <Feather name="play-circle" size={16} color={theme.colors.primary} />
-                  <Text style={[styles.reviewOnboardingText, { color: theme.colors.primary }]}>Guarda come funziona</Text>
-                  <Feather name="arrow-up-right" size={14} color={theme.colors.primary} />
-                </TouchableOpacity>
               </View>
 
               <View style={[styles.form, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }] }>
@@ -153,6 +119,8 @@ export default function LoginScreen({ navigation }: any) {
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
+                  autoComplete="email"
+                  textContentType="emailAddress"
                   value={email}
                   onChangeText={setEmail}
                   style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
@@ -183,6 +151,8 @@ export default function LoginScreen({ navigation }: any) {
                     placeholder="Inserisci la tua password"
                     placeholderTextColor={theme.colors.muted}
                     secureTextEntry={secure}
+                    autoComplete="password"
+                    textContentType="password"
                     value={password}
                     onChangeText={setPassword}
                     style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
@@ -196,8 +166,9 @@ export default function LoginScreen({ navigation }: any) {
                 <PrimaryButton
                   title={isSubmitting ? "Accedendo..." : "Accedi"}
                   onPress={handleLogin}
-                  disabled={isSubmitting}
+                  disabled={!canSubmit || isSubmitting}
                   isLoading={isSubmitting}
+                  accessibilityHint="Accede al tuo account cliente"
                 />
 
                 <View style={styles.footer}>
@@ -225,50 +196,13 @@ const styles = StyleSheet.create({
   },
   heroArea: {
     marginTop: 20,
-    marginBottom: 14,
+    marginBottom: 18,
     gap: 6,
-  },
-  valueCard: {
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 16,
-    marginBottom: 14,
-    gap: 10,
-  },
-  cardHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 4,
-  },
-  cardHeaderIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardHeaderTextBlock: {
-    flex: 1,
-  },
-  cardHeaderTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    marginBottom: 2,
-  },
-  cardHeaderSubtitle: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  softDivider: {
-    height: 1,
-    opacity: 0.9,
-    marginVertical: 2,
   },
   form: {
     padding: 18,
     borderRadius: 22,
-    marginTop: 4,
+    marginTop: 0,
     borderWidth: 1,
   },
   title: {
@@ -280,33 +214,6 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     lineHeight: 20,
-  },
-  reviewOnboardingButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
-  primaryActionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-  },
-  primaryActionText: {
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  reviewOnboardingText: {
-    fontSize: 14,
-    fontWeight: "700",
   },
   formHeader: {
     marginBottom: 14,
