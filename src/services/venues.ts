@@ -106,7 +106,7 @@ export async function fetchVenuePricing(venueId: string): Promise<VenuePricing> 
 
 export async function updateVenuePricing(
   venueId: string,
-  updates: Partial<Pick<VenuePricing, 'cloakroom_unit_price' | 'bar_price_list'>>,
+  updates: Partial<Pick<VenuePricing, 'cloakroom_unit_price' | 'bar_price_list' | 'bottle_price_list'>>,
 ): Promise<VenuePricing> {
   const { data } = await api.patch<VenuePricing>(
     API_ENDPOINTS.VENUES.PRICING(venueId),

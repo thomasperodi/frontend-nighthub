@@ -97,6 +97,7 @@ export type VenuePricing = {
   venue_id: string;
   cloakroom_unit_price: number;
   bar_price_list: Array<{ key: string; label: string; price: number }>;
+  bottle_price_list: Array<{ key: string; label: string; price: number }>;
 };
 
 export type Promo = {

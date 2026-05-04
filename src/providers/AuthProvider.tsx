@@ -12,7 +12,7 @@ type AuthContextValue = {
   user: PublicUser | null;
   token: string | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (identifier: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -212,8 +212,8 @@ export const AuthProvider = ({ children }: any) => {
     };
   }, [user?.id, token]);
 
-  const signIn = async (email: string, password: string) => {
-    const data = await apiLogin(email, password);
+  const signIn = async (identifier: string, password: string) => {
+    const data = await apiLogin(identifier, password);
     if (!data || !data.access_token) throw new Error('Invalid credentials');
     const normalizedUser = normalizeUser(data.user);
     await persistLogin(data.access_token, normalizedUser);

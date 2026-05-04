@@ -37,6 +37,8 @@ export default function VenuePricingTab({ venueId }: Props) {
   const [cloakroomPrice, setCloakroomPrice] = useState('3.00');
   const [newBarLabel, setNewBarLabel] = useState('');
   const [newBarPrice, setNewBarPrice] = useState('');
+  const [newBottleLabel, setNewBottleLabel] = useState('');
+  const [newBottlePrice, setNewBottlePrice] = useState('');
   const [barRows, setBarRows] = useState<PriceRow[]>(
     DEFAULT_BAR_MENU.map((item) => ({
       key: item.key,
@@ -44,6 +46,7 @@ export default function VenuePricingTab({ venueId }: Props) {
       value: item.defaultPrice.toFixed(2),
     })),
   );
+  const [bottleRows, setBottleRows] = useState<PriceRow[]>([]);
 
   const canSave = useMemo(
     () => !!venueId && !loading && !saving,
@@ -67,6 +70,7 @@ export default function VenuePricingTab({ venueId }: Props) {
 
       const pricingList = pricing.bar_price_list ?? [];
       const byKey = new Map(pricingList.map((item) => [String(item.key), item]));
+      const bottles = pricing.bottle_price_list ?? [];
 
       const defaultRows = DEFAULT_BAR_MENU.map((item) => {
         const matched = byKey.get(item.key);
@@ -86,6 +90,13 @@ export default function VenuePricingTab({ venueId }: Props) {
         }));
 
       setBarRows([...defaultRows, ...customRows]);
+        setBottleRows(
+          bottles.map((item) => ({
+            key: String(item.key),
+            label: item.label || String(item.key),
+            value: Number(item.price ?? 0).toFixed(2),
+          })),
+        );
     } catch (e: any) {
       setError(e?.message || 'Errore caricamento prezzi');
     } finally {
@@ -116,6 +127,14 @@ export default function VenuePricingTab({ venueId }: Props) {
       .replace(/[^a-z0-9]+/g, '_')
       .replace(/^_+|_+$/g, '')
       .slice(0, 30);
+
+  const sanitizeBottleKey = (label: string) =>
+    label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40);
 
   const addBarItem = () => {
     const label = newBarLabel.trim();
@@ -163,6 +182,55 @@ export default function VenuePricingTab({ venueId }: Props) {
     setNotice(null);
   };
 
+  const onChangeBottleValue = (key: string, text: string) => {
+    const sanitized = text.replace(/[^0-9.,]/g, '').replace(',', '.');
+    setBottleRows((prev) =>
+      prev.map((row) => (row.key === key ? { ...row, value: sanitized } : row)),
+    );
+  };
+
+  const addBottleItem = () => {
+    const label = newBottleLabel.trim();
+    const parsedPrice = Number(newBottlePrice.replace(',', '.'));
+
+    if (!label) {
+      setError('Inserisci il nome della bottiglia');
+      return;
+    }
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      setError('Prezzo bottiglia non valido');
+      return;
+    }
+
+    const baseKey = sanitizeBottleKey(label) || 'bottiglia';
+    const existing = new Set(bottleRows.map((row) => row.key));
+    let uniqueKey = baseKey;
+    let i = 1;
+    while (existing.has(uniqueKey)) {
+      uniqueKey = `${baseKey}_${i}`;
+      i += 1;
+    }
+
+    setBottleRows((prev) => [
+      ...prev,
+      {
+        key: uniqueKey,
+        label,
+        value: parsedPrice.toFixed(2),
+      },
+    ]);
+    setNewBottleLabel('');
+    setNewBottlePrice('');
+    setError(null);
+    setNotice(null);
+  };
+
+  const removeBottleItem = (key: string) => {
+    setBottleRows((prev) => prev.filter((row) => row.key !== key));
+    setError(null);
+    setNotice(null);
+  };
+
   const barAverage = useMemo(() => {
     if (!barRows.length) return '0.00';
     const total = barRows.reduce((acc, row) => {
@@ -171,6 +239,15 @@ export default function VenuePricingTab({ venueId }: Props) {
     }, 0);
     return (total / barRows.length).toFixed(2);
   }, [barRows]);
+
+  const bottleAverage = useMemo(() => {
+    if (!bottleRows.length) return '0.00';
+    const total = bottleRows.reduce((acc, row) => {
+      const parsed = Number(row.value.replace(',', '.'));
+      return acc + (Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
+    }, 0);
+    return (total / bottleRows.length).toFixed(2);
+  }, [bottleRows]);
 
   const handleSave = async () => {
     if (!venueId) {
@@ -193,8 +270,21 @@ export default function VenuePricingTab({ venueId }: Props) {
       };
     });
 
+    const bottle_price_list = bottleRows.map((row) => {
+      const parsed = Number(row.value.replace(',', '.'));
+      return {
+        key: row.key,
+        label: row.label,
+        price: Number.isFinite(parsed) && parsed >= 0 ? Number(parsed.toFixed(2)) : Number.NaN,
+      };
+    });
+
     if (bar_price_list.some((row) => !Number.isFinite(row.price) || row.price < 0)) {
       setError('Uno o più prezzi bar non sono validi');
+      return;
+    }
+    if (bottle_price_list.some((row) => !Number.isFinite(row.price) || row.price < 0)) {
+      setError('Uno o più prezzi bottiglie non sono validi');
       return;
     }
 
@@ -206,6 +296,7 @@ export default function VenuePricingTab({ venueId }: Props) {
       const updated = await updateVenuePricing(venueId, {
         cloakroom_unit_price: Number(cloakroomParsed.toFixed(2)),
         bar_price_list,
+        bottle_price_list,
       });
 
       setCloakroomPrice(Number(updated.cloakroom_unit_price).toFixed(2));
@@ -216,6 +307,13 @@ export default function VenuePricingTab({ venueId }: Props) {
         prev.map((row) => ({
           ...row,
           value: Number(byKey.get(row.key) ?? 0).toFixed(2),
+        })),
+      );
+      setBottleRows(
+        (updated.bottle_price_list ?? []).map((item) => ({
+          key: String(item.key),
+          label: item.label || String(item.key),
+          value: Number(item.price ?? 0).toFixed(2),
         })),
       );
 
@@ -256,7 +354,7 @@ export default function VenuePricingTab({ venueId }: Props) {
           </View>
           <View style={styles.heroTextWrap}>
             <Text style={[styles.heroTitle, { color: theme.colors.text }]}>Gestione prezzi locale</Text>
-            <Text style={[styles.heroSubtitle, { color: theme.colors.muted }]}>Aggiorna in modo rapido guardaroba e listino bar per lo staff.</Text>
+            <Text style={[styles.heroSubtitle, { color: theme.colors.muted }]}>Aggiorna guardaroba, listino bar e catalogo bottiglie usato dallo staff.</Text>
           </View>
         </View>
 
@@ -365,6 +463,90 @@ export default function VenuePricingTab({ venueId }: Props) {
               </View>
             </View>
           ))}
+        </View>
+
+        <View style={[styles.card, { borderColor: theme.colors.border }]}> 
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.title, { color: theme.colors.text }]}>Bottiglie</Text>
+            <Text style={[styles.sectionBadge, { color: theme.colors.primary, borderColor: theme.colors.primary + '66' }]}>Media € {bottleAverage}</Text>
+          </View>
+          <Text style={[styles.subtitle, { color: theme.colors.muted }]}>Catalogo usato dal cameriere per selezionare solo le bottiglie disponibili del locale.</Text>
+
+          <View style={[styles.addRowCard, { borderColor: theme.colors.border }]}> 
+            <TextInput
+              value={newBottleLabel}
+              onChangeText={setNewBottleLabel}
+              placeholder="Nome bottiglia (es. Belvedere 0.7)"
+              placeholderTextColor={theme.colors.muted}
+              style={[styles.newLabelInput, { borderColor: theme.colors.border, color: theme.colors.text }]}
+            />
+            <View style={styles.newPriceWrap}>
+              <Text style={[styles.euroSmall, { color: theme.colors.text }]}>€</Text>
+              <TextInput
+                value={newBottlePrice}
+                onChangeText={(text) => setNewBottlePrice(text.replace(/[^0-9.,]/g, '').replace(',', '.'))}
+                onBlur={() => {
+                  if (!newBottlePrice.trim()) return;
+                  setNewBottlePrice((prev) => normalizePrice(prev));
+                }}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor={theme.colors.muted}
+                style={[styles.newPriceInput, { borderColor: theme.colors.border, color: theme.colors.text }]}
+              />
+              <TouchableOpacity
+                onPress={addBottleItem}
+                style={[styles.addBtn, { backgroundColor: theme.colors.primary }]}
+              >
+                <Feather name="plus" size={16} color="white" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {bottleRows.length === 0 ? (
+            <View style={styles.emptyCatalogState}>
+              <Feather name="package" size={18} color={theme.colors.muted} />
+              <Text style={[styles.emptyCatalogText, { color: theme.colors.muted }]}>Nessuna bottiglia configurata</Text>
+            </View>
+          ) : (
+            bottleRows.map((row) => (
+              <View key={row.key} style={[styles.menuRow, { borderColor: theme.colors.border }]}> 
+                <Text style={[styles.menuLabel, { color: theme.colors.text }]}>{row.label}</Text>
+                <View style={styles.menuInputWrap}>
+                  <Text style={[styles.euroSmall, { color: theme.colors.text }]}>€</Text>
+                  <TextInput
+                    value={row.value}
+                    onFocus={() => setFocusedField(`bottle_${row.key}`)}
+                    onBlur={() => {
+                      setFocusedField(null);
+                      setBottleRows((prev) =>
+                        prev.map((item) =>
+                          item.key === row.key ? { ...item, value: normalizePrice(item.value) } : item,
+                        ),
+                      );
+                    }}
+                    onChangeText={(text) => onChangeBottleValue(row.key, text)}
+                    keyboardType="decimal-pad"
+                    style={[
+                      styles.menuInput,
+                      {
+                        borderColor: focusedField === `bottle_${row.key}` ? theme.colors.primary : theme.colors.border,
+                        color: theme.colors.text,
+                      },
+                    ]}
+                    placeholder="0.00"
+                    placeholderTextColor={theme.colors.muted}
+                  />
+                  <TouchableOpacity
+                    onPress={() => removeBottleItem(row.key)}
+                    style={[styles.removeBtn, { borderColor: theme.colors.border }]}
+                  >
+                    <Feather name="x" size={14} color={theme.colors.muted} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
         </View>
 
         {!!error && (
@@ -619,5 +801,19 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '900',
     fontSize: 14,
+  },
+  emptyCatalogState: {
+    marginTop: 10,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  emptyCatalogText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

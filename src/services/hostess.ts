@@ -38,6 +38,10 @@ type BackendEventTable = {
   venue_table_id: string;
   assigned_number?: number | null;
   table_name?: string | null;
+  per_testa?: any;
+  costo_minimo?: any;
+  per_testa_override?: any;
+  costo_minimo_override?: any;
   prenotati: number;
   entrati: number;
   pagato_totale: any;
@@ -65,8 +69,15 @@ const toNumber = (value: any): number => {
 function mapEventTableToHostessTable(t: BackendEventTable): HostessTable {
   const prenotati = Number(t.prenotati ?? 0);
   const entrati = Number(t.entrati ?? 0);
-  const per_testa = toNumber(t.venue_table?.per_testa);
-  const costo_minimo = toNumber(t.venue_table?.costo_minimo);
+  const per_testa = toNumber(
+    t.per_testa ?? t.per_testa_override ?? t.venue_table?.per_testa,
+  );
+  const costoMinimoRaw =
+    t.costo_minimo ?? t.costo_minimo_override ?? t.venue_table?.costo_minimo;
+  const costo_minimo =
+    costoMinimoRaw === null || costoMinimoRaw === undefined
+      ? null
+      : toNumber(costoMinimoRaw);
   const pagato_totale = toNumber(t.pagato_totale);
 
   const stato: HostessTable['stato'] =

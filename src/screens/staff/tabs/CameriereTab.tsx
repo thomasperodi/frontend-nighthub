@@ -1,8 +1,16 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, TextInput } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, TextInput, Modal, Pressable } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "../../../theme/ThemeProvider";
-import { addTablePayment, getWaiterTables, settleTable, type WaiterTable } from "../../../services/staff";
+import { fetchVenuePricing } from "../../../services/venues";
+import {
+  addTablePayment,
+  createTableBottleOrder,
+  getWaiterTables,
+  settleTable,
+  type WaiterTable,
+} from "../../../services/staff";
+import type { VenuePricing } from "../../../types/events";
 
 export default function CameriereTab({ openPrompt, showToast, userId, eventId, venueId }: any) {
   const { theme } = useTheme();
@@ -11,6 +19,47 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
   const [error, setError] = useState<string | null>(null);
   const [importiSaldati, setImportiSaldati] = useState<Record<string, number>>({});
   const [searchQuery, setSearchQuery] = useState('');
+  const [catalogoBottiglie, setCatalogoBottiglie] = useState<VenuePricing['bottle_price_list']>([]);
+  const [bottleModalVisible, setBottleModalVisible] = useState(false);
+  const [selectedTableForBottle, setSelectedTableForBottle] = useState<string | null>(null);
+  const [selectedBottleKey, setSelectedBottleKey] = useState<string | null>(null);
+  const [selectedBottleQuantity, setSelectedBottleQuantity] = useState('1');
+
+  const refreshTables = useCallback(async () => {
+    if (!eventId || !userId) {
+      setTavoli([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    const data = await getWaiterTables(String(userId), String(eventId), {
+      onlyBooked: true,
+      venueId: venueId ? String(venueId) : undefined,
+    });
+
+    setTavoli(data);
+    setImportiSaldati(prev => {
+      const next = { ...prev };
+      data.forEach(t => {
+        if (t.is_saldato && next[t.id] === undefined) {
+          next[t.id] = Number(t.pagato_totale || 0);
+        }
+      });
+      return next;
+    });
+    setError(null);
+  }, [eventId, userId, venueId]);
+
+  const refreshBottleCatalog = useCallback(async () => {
+    if (!venueId) {
+      setCatalogoBottiglie([]);
+      return;
+    }
+
+    const pricing = await fetchVenuePricing(String(venueId));
+    setCatalogoBottiglie(Array.isArray(pricing.bottle_price_list) ? pricing.bottle_price_list : []);
+  }, [venueId]);
 
   const tavoliPrenotati = tavoli.filter(t => Number(t.prenotati ?? 0) > 0);
 
@@ -26,29 +75,9 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
     let mounted = true;
     (async () => {
       try {
-        if (!eventId || !userId) {
-          if (mounted) {
-            setTavoli([]);
-            setError(null);
-            setLoading(false);
-          }
-          return;
-        }
         setLoading(true);
-        const data = await getWaiterTables(String(userId), String(eventId), {
-          onlyBooked: true,
-          venueId: venueId ? String(venueId) : undefined,
-        });
         if (mounted) {
-          setTavoli(data);
-          // Inizializza gli importi saldati per i tavoli già saldati
-          const saldati: Record<string, number> = {};
-          data.forEach(t => {
-            if (t.is_saldato) {
-              saldati[t.id] = Number(t.pagato_totale || 0);
-            }
-          });
-          setImportiSaldati(prev => ({ ...prev, ...saldati }));
+          await Promise.all([refreshTables(), refreshBottleCatalog()]);
         }
       } catch (e: any) {
         if (mounted) setError(e?.message || "Errore nel caricamento dei tavoli");
@@ -57,7 +86,7 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
       }
     })();
     return () => { mounted = false; };
-  }, [eventId, userId]);
+  }, [refreshBottleCatalog, refreshTables]);
 
   const aggiungiBudget = (id: string) => {
     openPrompt({
@@ -82,28 +111,61 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
               showToast(`+€${parsed.toFixed(2)}`);
               
               // Refresh data
-              if (eventId && userId) {
-                const updatedData = await getWaiterTables(String(userId), String(eventId), {
-                  onlyBooked: true,
-                  venueId: venueId ? String(venueId) : undefined,
-                });
-                setTavoli(updatedData);
-              }
+              await refreshTables();
             } catch (e: any) {
               showToast(e?.message || "Errore nell'aggiunta del pagamento");
               // Rollback
-              if (eventId && userId) {
-                const data = await getWaiterTables(String(userId), String(eventId), {
-                  onlyBooked: true,
-                  venueId: venueId ? String(venueId) : undefined,
-                });
-                setTavoli(data);
-              }
+              await refreshTables();
             }
           }
         }
       }
     });
+  };
+
+  const aggiungiBottiglia = (id: string) => {
+    if (!catalogoBottiglie.length) {
+      showToast('Configura prima le bottiglie nel tab prezzi del locale');
+      return;
+    }
+
+    setSelectedTableForBottle(id);
+    setSelectedBottleKey(catalogoBottiglie[0]?.key ?? null);
+    setSelectedBottleQuantity('1');
+    setBottleModalVisible(true);
+  };
+
+  const confermaBottiglia = async () => {
+    if (!selectedTableForBottle || !selectedBottleKey) {
+      showToast('Seleziona una bottiglia');
+      return;
+    }
+
+    const quantity = selectedBottleQuantity ? parseInt(selectedBottleQuantity, 10) : 1;
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      showToast('Quantita non valida');
+      return;
+    }
+
+    const selectedBottle = catalogoBottiglie.find((item) => item.key === selectedBottleKey);
+    if (!selectedBottle) {
+      showToast('Bottiglia non disponibile');
+      return;
+    }
+
+    try {
+      await createTableBottleOrder(selectedTableForBottle, {
+        bottle_key: selectedBottle.key,
+        quantity,
+        auto_settle: true,
+      });
+      setBottleModalVisible(false);
+      showToast(`Bottiglia richiesta • €${(selectedBottle.price * quantity).toFixed(2)}`);
+      await refreshTables();
+    } catch (e: any) {
+      showToast(e?.message || "Errore nella richiesta bottiglia");
+      await refreshTables();
+    }
   };
 
   const saldaTavolo = (id: string) => {
@@ -152,23 +214,11 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
               showToast(importoMancante > 0 ? `Tavolo saldato (+€${importoMancante.toFixed(2)})` : "Tavolo saldato");
               
               // Refresh data
-              if (eventId && userId) {
-                const updatedData = await getWaiterTables(String(userId), String(eventId), {
-                  onlyBooked: true,
-                  venueId: venueId ? String(venueId) : undefined,
-                });
-                setTavoli(updatedData);
-              }
+              await refreshTables();
             } catch (e: any) {
               showToast(e?.message || "Errore nel saldo del tavolo");
               // Rollback
-              if (eventId && userId) {
-                const data = await getWaiterTables(String(userId), String(eventId), {
-                  onlyBooked: true,
-                  venueId: venueId ? String(venueId) : undefined,
-                });
-                setTavoli(data);
-              }
+              await refreshTables();
             }
           }
         }
@@ -179,7 +229,11 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
   const getTotals = () => {
     const attivi = tavoliPrenotati.filter(t => !t.is_saldato);
     const totBudget = attivi.reduce((sum, t) => sum + Number(t.pagato_totale || 0), 0);
-    return { attivi: attivi.length, totBudget };
+    const bottiglieInCorso = tavoliPrenotati.reduce(
+      (sum, t) => sum + (t.bottle_orders ?? []).filter(order => order.status !== 'delivered').length,
+      0,
+    );
+    return { attivi: attivi.length, totBudget, bottiglieInCorso };
   };
 
   const totals = getTotals();
@@ -212,6 +266,7 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
   }
 
   return (
+    <>
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <View>
@@ -231,6 +286,7 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
           <View style={{ flex: 1 }}>
             <Text style={styles.budgetSummaryLabel}>Budget totale attivo</Text>
             <Text style={styles.budgetSummaryValue}>€{totals.totBudget.toFixed(2)}</Text>
+            <Text style={styles.bottleSummaryText}>{totals.bottiglieInCorso} bottiglie in lavorazione</Text>
           </View>
         </View>
       </View>
@@ -275,6 +331,8 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
           const tableLabel = String(t.table_name ?? '').trim();
           const zonaLabel = String(t.zona ?? '').trim();
           const primaryTitle = tableLabel || String(t.nome ?? '').trim() || 'Tavolo';
+          const bottleOrders = t.bottle_orders ?? [];
+          const pendingBottleOrders = bottleOrders.filter(order => order.status !== 'delivered');
           
           // Calcola importo saldato e aggiunte successive
           const importoSaldato = importiSaldati[t.id] || 0;
@@ -355,7 +413,46 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
                 </Text>
               </View>
 
+              {bottleOrders.length > 0 && (
+                <View style={styles.bottleOrdersContainer}>
+                  <View style={styles.bottleOrdersHeader}>
+                    <Text style={styles.bottleOrdersTitle}>Bottiglie richieste</Text>
+                    <Text style={styles.bottleOrdersCount}>{pendingBottleOrders.length} aperte</Text>
+                  </View>
+                  {bottleOrders.map(order => {
+                    const isDelivered = order.status === 'delivered';
+                    const statusLabel =
+                      order.status === 'requested'
+                        ? 'Richiesta'
+                        : order.status === 'preparing'
+                          ? 'In preparazione'
+                          : 'Uscita';
+
+                    return (
+                      <View key={order.id} style={[styles.bottleOrderRow, isDelivered && styles.bottleOrderRowDelivered]}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.bottleOrderName}>{order.quantity}× {order.bottle_name}</Text>
+                          <Text style={styles.bottleOrderMeta}>€{order.unit_price.toFixed(2)} cad. • Totale €{order.total_price.toFixed(2)}</Text>
+                        </View>
+                        <View style={[styles.bottleStatusBadge, order.status === 'requested' ? styles.bottleStatusRequested : order.status === 'preparing' ? styles.bottleStatusPreparing : styles.bottleStatusDelivered]}>
+                          <Text style={styles.bottleStatusText}>{statusLabel}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
               <View style={styles.tableActions}>
+                <TouchableOpacity 
+                  style={[styles.tableButton, styles.bottleButton]}
+                  onPress={() => aggiungiBottiglia(t.id)}
+                >
+                  <Feather name="package" size={18} color="white" />
+                  <Text style={styles.tableButtonText}>Aggiungi bottiglia</Text>
+                </TouchableOpacity>
+
+                <View style={styles.tableActionsRow}>
                 <TouchableOpacity 
                   style={[styles.tableButton, styles.moneyButton, isSaldato && styles.paidTableMoneyButton]}
                   onPress={() => aggiungiBudget(t.id)}
@@ -373,12 +470,70 @@ export default function CameriereTab({ openPrompt, showToast, userId, eventId, v
                     <Text style={styles.tableButtonText}>Salda tavolo</Text>
                   </TouchableOpacity>
                 )}
+                </View>
               </View>
             </View>
           );
         })
       )}
     </ScrollView>
+
+    <Modal
+      visible={bottleModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setBottleModalVisible(false)}
+    >
+      <Pressable style={styles.modalOverlay} onPress={() => setBottleModalVisible(false)}>
+        <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Seleziona bottiglia</Text>
+            <TouchableOpacity onPress={() => setBottleModalVisible(false)}>
+              <Feather name="x" size={18} color="white" />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.modalSubtitle}>Il prezzo viene preso dal catalogo del locale.</Text>
+
+          <ScrollView style={styles.modalBottleList} contentContainerStyle={styles.modalBottleListContent}>
+            {catalogoBottiglie.map((item) => {
+              const active = item.key === selectedBottleKey;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[styles.modalBottleOption, active && styles.modalBottleOptionActive]}
+                  onPress={() => setSelectedBottleKey(item.key)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.modalBottleLabel}>{item.label}</Text>
+                    <Text style={styles.modalBottlePrice}>€{Number(item.price ?? 0).toFixed(2)}</Text>
+                  </View>
+                  {active && <Feather name="check-circle" size={18} color="#22c55e" />}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.modalQuantityRow}>
+            <Text style={styles.modalQuantityLabel}>Quantita</Text>
+            <TextInput
+              value={selectedBottleQuantity}
+              onChangeText={(text) => setSelectedBottleQuantity(text.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              style={styles.modalQuantityInput}
+              placeholder="1"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+            />
+          </View>
+
+          <TouchableOpacity style={styles.modalConfirmButton} onPress={() => void confermaBottiglia()}>
+            <Feather name="package" size={16} color="white" />
+            <Text style={styles.modalConfirmText}>Invia alla cambusa</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+    </>
   );
 }
 
@@ -454,6 +609,13 @@ const styles = StyleSheet.create({
     color: "#4ECDC4",
     fontSize: 28,
     fontWeight: "900",
+  },
+
+  bottleSummaryText: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 4,
   },
 
   tableCard: {
@@ -560,6 +722,10 @@ const styles = StyleSheet.create({
   },
 
   tableActions: {
+    gap: 10,
+  },
+
+  tableActionsRow: {
     flexDirection: "row",
     gap: 12,
   },
@@ -587,6 +753,10 @@ const styles = StyleSheet.create({
 
   moneyButton: {
     backgroundColor: "#3B82F6",
+  },
+
+  bottleButton: {
+    backgroundColor: "#8B5CF6",
   },
 
   paidTableMoneyButton: {
@@ -767,6 +937,81 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
 
+  bottleOrdersContainer: {
+    backgroundColor: "rgba(139,92,246,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(167,139,250,0.32)",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+    gap: 10,
+  },
+
+  bottleOrdersHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  bottleOrdersTitle: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  bottleOrdersCount: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  bottleOrderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  bottleOrderRowDelivered: {
+    opacity: 0.72,
+  },
+
+  bottleOrderName: {
+    color: "white",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  bottleOrderMeta: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  bottleStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+
+  bottleStatusRequested: {
+    backgroundColor: "rgba(251,191,36,0.18)",
+  },
+
+  bottleStatusPreparing: {
+    backgroundColor: "rgba(59,130,246,0.18)",
+  },
+
+  bottleStatusDelivered: {
+    backgroundColor: "rgba(34,197,94,0.18)",
+  },
+
+  bottleStatusText: {
+    color: "white",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+
   totaleDetail: {
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.2)",
@@ -779,5 +1024,121 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     textAlign: "right",
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.58)",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  modalCard: {
+    backgroundColor: "#111827",
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    maxHeight: "80%",
+  },
+
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+
+  modalTitle: {
+    color: "white",
+    fontSize: 20,
+    fontWeight: "900",
+  },
+
+  modalSubtitle: {
+    color: "rgba(255,255,255,0.66)",
+    fontSize: 13,
+    marginTop: 6,
+    marginBottom: 14,
+  },
+
+  modalBottleList: {
+    maxHeight: 280,
+  },
+
+  modalBottleListContent: {
+    gap: 10,
+  },
+
+  modalBottleOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 14,
+    padding: 12,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+
+  modalBottleOptionActive: {
+    borderColor: "rgba(34,197,94,0.65)",
+    backgroundColor: "rgba(34,197,94,0.1)",
+  },
+
+  modalBottleLabel: {
+    color: "white",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  modalBottlePrice: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  modalQuantityRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+
+  modalQuantityLabel: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  modalQuantityInput: {
+    minWidth: 92,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "white",
+    textAlign: "center",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  modalConfirmButton: {
+    marginTop: 18,
+    backgroundColor: "#8B5CF6",
+    borderRadius: 14,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+
+  modalConfirmText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "900",
   },
 });

@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import BottomNav, { NavItem } from "../../components/BottomNav";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../providers/AuthProvider";
-import { fetchEventsByVenue, fetchEventStats } from "../../services/events";
+import { fetchEventsByVenue, fetchEventStats, fetchEventById } from "../../services/events";
 import { fetchReservationsByEvent } from "../../services/reservations";
 import { listHostessTables } from "../../services/hostess";
 import { fetchVenueById } from "../../services/venues";
@@ -284,14 +284,25 @@ export default function VenueHomeScreen() {
         const wantsHostessTables = Boolean(live?.id && live.id === effectiveSelectedEventId);
 
         const settled = await Promise.allSettled([
+          fetchEventById(effectiveSelectedEventId),
           fetchEventStats(effectiveSelectedEventId),
           fetchReservationsByEvent(effectiveSelectedEventId),
           wantsHostessTables ? listHostessTables({ eventId: effectiveSelectedEventId, venueId }) : Promise.resolve([]),
         ]);
 
-        const [statsRes, reservationsRes, tablesRes] = settled;
+        const [eventDetailRes, statsRes, reservationsRes, tablesRes] = settled;
 
         if (requestSeq.current !== seq) return;
+
+        if (eventDetailRes.status === 'fulfilled' && eventDetailRes.value) {
+          const eventDetail = eventDetailRes.value;
+          setVenueEvents((prev) =>
+            prev.map((evt) => (evt.id === eventDetail.id ? { ...evt, ...eventDetail } : evt)),
+          );
+          if (live?.id === eventDetail.id) {
+            setLiveEvent((prev) => (prev?.id === eventDetail.id ? { ...prev, ...eventDetail } : prev));
+          }
+        }
 
         if (statsRes.status === 'fulfilled') {
           setEventStats(statsRes.value);
@@ -1008,6 +1019,7 @@ return (
       <CreateReservationModal
         visible={bookingVisible}
         onClose={() => setBookingVisible(false)}
+        event={selectedEvent ?? liveEvent}
         eventId={(selectedEvent ?? liveEvent)!.id}
         defaultDate={(selectedEvent ?? liveEvent)!.date}
         userId={user.id}

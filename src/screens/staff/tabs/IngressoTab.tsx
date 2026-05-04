@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useTheme } from "../../../theme/ThemeProvider";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { recordEntry, fetchStaffEventStats, listEntries, scanEntryQr } from "../../../services/staff";
 import { EventStats } from "../../../types/events";
@@ -14,6 +14,20 @@ type Props = {
   venueId?: string;
 };
 
+type AgeBucket =
+  | 'AGE_18_20'
+  | 'AGE_21_24'
+  | 'AGE_25_29'
+  | 'AGE_30_34'
+  | 'AGE_35_PLUS'
+  | 'UNKNOWN';
+
+type ManualEntryPayload = {
+  gender: 'M' | 'F' | 'ALTRO';
+  isComplimentary: boolean;
+  ageBucket?: AgeBucket;
+};
+
 export default function IngressoTab({ showToast, openPrompt, eventId, staffId, venueId }: Props) {
   const { theme } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
@@ -23,6 +37,18 @@ export default function IngressoTab({ showToast, openPrompt, eventId, staffId, v
   const [busy, setBusy] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
   const pulse = useRef(new Animated.Value(1)).current;
+
+  const errorInfo = (err: any) => {
+    const status = err?.response?.status ?? null;
+    const data = err?.response?.data ?? null;
+    const rawMessage = data?.message ?? err?.message;
+    const message = Array.isArray(rawMessage)
+      ? rawMessage.filter(Boolean).join(', ')
+      : typeof rawMessage === 'string' && rawMessage.trim().length
+        ? rawMessage
+        : 'Errore sconosciuto';
+    return { status, data, message };
+  };
 
   useEffect(() => {
     let anim: any;
@@ -37,35 +63,62 @@ export default function IngressoTab({ showToast, openPrompt, eventId, staffId, v
     return () => anim && anim.stop();
   }, [scanning]);
 
-  useEffect(() => {
+  const loadEntryState = useCallback(async () => {
     if (!eventId) return;
-    // carica stats + storico per popolare i contatori
-    void (async () => {
-      try {
-        const [statsDb, entries] = await Promise.all([
-          fetchStaffEventStats(eventId),
-          listEntries(eventId),
-        ]);
-        setEventStats(statsDb);
-        const counts = entries.reduce(
-          (acc, curr) => {
-            const t = curr.entry_type;
-            if (t === 'male') acc.uomini += curr.quantity ?? 1;
-            else if (t === 'female') acc.donne += curr.quantity ?? 1;
-            else if (t === 'free') acc.omaggi += curr.quantity ?? 1;
-            else acc.omaggi += curr.quantity ?? 1; // default unknown as free
+    try {
+      const [statsDb, entries] = await Promise.all([
+        fetchStaffEventStats(eventId),
+        listEntries(eventId),
+      ]);
+      setEventStats(statsDb);
+      const counts = entries.reduce(
+        (acc, curr) => {
+          const quantity = curr.quantity ?? 1;
+          if (curr.is_complimentary) {
+            acc.omaggi += quantity;
             return acc;
-          },
-          { uomini: 0, donne: 0, omaggi: 0 },
-        );
-        setStats(counts);
-      } catch (err) {
-        // silent
-      }
-    })();
-  }, [eventId]);
+          }
 
-  const addEntry = async (type: 'uomini' | 'donne' | 'omaggi') => {
+          if (curr.gender === 'M') {
+            acc.uomini += quantity;
+          } else if (curr.gender === 'F') {
+            acc.donne += quantity;
+          } else {
+            acc.omaggi += quantity;
+          }
+
+          return acc;
+        },
+        { uomini: 0, donne: 0, omaggi: 0 },
+      );
+      setStats(counts);
+    } catch (err) {
+      console.error('[staff.ingresso] loadEntryState error', {
+        eventId,
+        staffId,
+        venueId,
+        ...(errorInfo(err) as any),
+      });
+    }
+  }, [eventId, staffId, venueId]);
+
+  useEffect(() => {
+    void loadEntryState();
+  }, [loadEntryState]);
+
+  const ageBucketFromInput = (raw: string): AgeBucket | undefined | 'invalid' => {
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+    const age = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(age) || age < 0 || age > 100) return 'invalid';
+    if (age <= 20) return 'AGE_18_20';
+    if (age <= 24) return 'AGE_21_24';
+    if (age <= 29) return 'AGE_25_29';
+    if (age <= 34) return 'AGE_30_34';
+    return 'AGE_35_PLUS';
+  };
+
+  const addEntry = async ({ gender, isComplimentary, ageBucket }: ManualEntryPayload) => {
     if (!eventId) {
       showToast('Imposta prima un evento');
       return;
@@ -73,21 +126,80 @@ export default function IngressoTab({ showToast, openPrompt, eventId, staffId, v
     if (busy) return;
     setBusy(true);
     try {
-      setStats(prev => ({ ...prev, [type]: prev[type] + 1 }));
-      const entry_type = type === 'uomini' ? 'male' : type === 'donne' ? 'female' : 'free';
+      console.log('[staff.ingresso] addEntry request', {
+        eventId,
+        staffId,
+        venueId,
+        gender,
+        isComplimentary,
+        ageBucket: ageBucket ?? null,
+      });
+
+      setStats((prev) => {
+        if (isComplimentary) return { ...prev, omaggi: prev.omaggi + 1 };
+        if (gender === 'M') return { ...prev, uomini: prev.uomini + 1 };
+        if (gender === 'F') return { ...prev, donne: prev.donne + 1 };
+        return { ...prev, omaggi: prev.omaggi + 1 };
+      });
+
+      const entry_type = isComplimentary
+        ? 'free'
+        : gender === 'M'
+          ? 'male'
+          : gender === 'F'
+            ? 'female'
+            : 'free';
+
       const { stats: updated } = await recordEntry({
         event_id: eventId,
         staff_id: staffId,
         quantity: 1,
         entry_type,
+        gender,
+        is_complimentary: isComplimentary,
+        age_bucket: ageBucket,
       });
+
+      console.log('[staff.ingresso] addEntry success', {
+        eventId,
+        totalEntries: updated?.total_entries,
+        entriesRevenue: updated?.total_entries_revenue,
+      });
+
       setEventStats(updated);
-      showToast(type === 'omaggi' ? 'Omaggio registrato' : 'Ingresso registrato');
+      showToast(isComplimentary ? 'Omaggio registrato' : 'Ingresso registrato');
     } catch (err) {
-      showToast('Errore salvataggio ingresso');
+      const info = errorInfo(err);
+      console.error('[staff.ingresso] addEntry error', {
+        eventId,
+        staffId,
+        venueId,
+        gender,
+        isComplimentary,
+        ageBucket: ageBucket ?? null,
+        ...info,
+      });
+      showToast(info.message || 'Errore salvataggio ingresso');
+      void loadEntryState();
     } finally {
       setBusy(false);
     }
+  };
+
+  const addEntryWithOptionalAge = (base: Omit<ManualEntryPayload, 'ageBucket'>) => {
+    openPrompt({
+      title: 'Età (opzionale)',
+      placeholder: 'Es. 23 - lascia vuoto per saltare',
+      keyboardType: 'numeric',
+      onSubmit: (value: string) => {
+        const parsed = ageBucketFromInput(value);
+        if (parsed === 'invalid') {
+          showToast('Età non valida');
+          return;
+        }
+        void addEntry({ ...base, ageBucket: parsed });
+      },
+    });
   };
 
   const handleQrScanned = async (data: string) => {
@@ -100,19 +212,42 @@ export default function IngressoTab({ showToast, openPrompt, eventId, staffId, v
         return;
       }
 
+      console.log('[staff.ingresso] qrScan request', {
+        eventId,
+        staffId,
+        venueId,
+        qrPreview: String(data ?? '').slice(0, 40),
+      });
+
       const result = await scanEntryQr({
         event_id: eventId,
         qr_data: data,
         staff_id: staffId,
       });
 
+      console.log('[staff.ingresso] qrScan success', {
+        eventId,
+        alreadyCheckedIn: Boolean(result?.alreadyCheckedIn),
+        reservationId: result?.reservation?.id ?? null,
+        entryId: result?.entry?.id ?? null,
+      });
+
       if (result?.alreadyCheckedIn) {
         showToast('Ingresso già registrato');
       } else {
+        await loadEntryState();
         showToast('Ingresso registrato');
       }
-    } catch {
-      showToast('Errore registrazione ingresso');
+    } catch (err) {
+      const info = errorInfo(err);
+      console.error('[staff.ingresso] qrScan error', {
+        eventId,
+        staffId,
+        venueId,
+        qrPreview: String(data ?? '').slice(0, 40),
+        ...info,
+      });
+      showToast(info.message || 'Errore registrazione ingresso');
     } finally {
       setScanBusy(false);
     }
@@ -198,24 +333,35 @@ export default function IngressoTab({ showToast, openPrompt, eventId, staffId, v
 
       {/* Aggiunta rapida */}
       <Text style={styles.sectionTitle}>Aggiunta rapida</Text>
+      <Text style={styles.sectionHint}>Tieni premuto su un pulsante per registrare anche la fascia età</Text>
       <View style={styles.quickRow}>
         <QuickAdd 
           label="Uomo" 
           icon="user" 
           color="#3B82F6"
-          onPress={() => addEntry('uomini')} 
+          onPress={() => void addEntry({ gender: 'M', isComplimentary: false })}
+          onLongPress={() => addEntryWithOptionalAge({ gender: 'M', isComplimentary: false })}
         />
         <QuickAdd 
           label="Donna" 
           icon="user" 
           color="#EC4899"
-          onPress={() => addEntry('donne')} 
+          onPress={() => void addEntry({ gender: 'F', isComplimentary: false })}
+          onLongPress={() => addEntryWithOptionalAge({ gender: 'F', isComplimentary: false })}
         />
         <QuickAdd 
-          label="Omaggio" 
+          label="Omaggio Uomo" 
           icon="gift" 
-          color="#8B5CF6"
-          onPress={() => addEntry('omaggi')} 
+          color="#7C3AED"
+          onPress={() => void addEntry({ gender: 'M', isComplimentary: true })}
+          onLongPress={() => addEntryWithOptionalAge({ gender: 'M', isComplimentary: true })}
+        />
+        <QuickAdd 
+          label="Omaggio Donna" 
+          icon="gift" 
+          color="#A855F7"
+          onPress={() => void addEntry({ gender: 'F', isComplimentary: true })}
+          onLongPress={() => addEntryWithOptionalAge({ gender: 'F', isComplimentary: true })}
         />
       </View>
     </ScrollView>
@@ -232,7 +378,7 @@ function StatCard({ icon, label, count, color }: any) {
   );
 }
 
-function QuickAdd({ label, icon, color, onPress }: any) {
+function QuickAdd({ label, icon, color, onPress, onLongPress }: any) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
@@ -288,7 +434,13 @@ function QuickAdd({ label, icon, color, onPress }: any) {
   };
 
   return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={0.85} style={{ flex: 1 }}>
+    <TouchableOpacity
+      onPress={handlePress}
+      onLongPress={onLongPress}
+      delayLongPress={320}
+      activeOpacity={0.85}
+      style={{ flex: 1 }}
+    >
       <Animated.View style={[
         styles.quickAdd, 
         { 
@@ -470,6 +622,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginBottom: 16,
     marginTop: 8,
+  },
+
+  sectionHint: {
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 12,
+    marginBottom: 12,
   },
 
   quickRow: {

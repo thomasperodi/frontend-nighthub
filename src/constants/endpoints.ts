@@ -133,6 +133,10 @@ export const API_ENDPOINTS = {
     CLOAKROOM_SALES: '/staff/cloakroom-sales',
     ENTRIES: '/staff/entries',
     TABLE_SALES: '/staff/table-sales',
+    BOTTLE_ORDERS: '/staff/bottle-orders',
+    BOTTLE_ORDER_PREPARE: (id: string) => `/staff/bottle-orders/${id}/prepare`,
+    BOTTLE_ORDER_DISPATCH: (id: string) => `/staff/bottle-orders/${id}/dispatch`,
+    WAITER_TABLE_BOTTLE_ORDERS: (id: string) => `/staff/waiter/tables/${id}/bottle-orders`,
     // Hostess (Ragazza Immagine) - tables overview with per-head spend and zones
     HOSTESS_TABLES: '/staff/hostess-tables',
     HOSTESS_TABLE_DETAIL: (id: string) => `/staff/hostess-tables/${id}`,
