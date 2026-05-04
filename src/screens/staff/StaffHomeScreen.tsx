@@ -12,6 +12,7 @@ import IngressoTab from "./tabs/IngressoTab";
 import GuardarobaTab from "./tabs/GuardarobaTab";
 import ImmagineTab from "./tabs/ImmagineTab";
 import CameriereTab from "./tabs/CameriereTab";
+import CambusaTab from "./tabs/CambusaTab";
 import BarTab from "./tabs/BarTab";
 import PrDashboardTab from "./tabs/PrDashboardTab";
 
@@ -25,6 +26,7 @@ type StaffRole =
   | "guardaroba"
   | "immagine"
   | "cameriere"
+  | "cambusa"
   | "pr_dashboard"
   | "bar"
   | null;
@@ -66,6 +68,13 @@ const ROLE_OPTIONS: Array<{
     requiresLiveEvent: true,
   },
   {
+    key: "cambusa",
+    icon: "package",
+    label: "Cambusa",
+    description: "Bottiglie in preparazione",
+    requiresLiveEvent: true,
+  },
+  {
     key: "bar",
     icon: "coffee",
     label: "Bar",
@@ -86,6 +95,7 @@ const ROLE_LABELS: Record<Exclude<StaffRole, null>, string> = {
   guardaroba: "Guardaroba",
   immagine: "Tavoli & PR",
   cameriere: "Cameriere",
+  cambusa: "Cambusa",
   bar: "Bar",
   pr_dashboard: "PR Dashboard",
 };
@@ -489,6 +499,13 @@ export default function StaffHomeScreen() {
             userId={user?.id}
             eventId={eventId}
             venueId={user?.venue_id}
+          />
+        )}
+        {role === "cambusa" && (
+          <CambusaTab
+            showToast={showToast}
+            eventId={eventId}
+            venueId={user?.venue_id ?? undefined}
           />
         )}
         {role === "bar" && (

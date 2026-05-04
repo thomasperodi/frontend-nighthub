@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,6 @@ import type { Event } from '../../../types/events';
 import type { Reservation } from '../../../types/reservations';
 import { cancelReservation, updateReservation } from '../../../services/reservations';
 
-type VisibleStatus = Extract<Reservation['status'], 'pending' | 'confirmed'>;
 type StatusFilter = 'pending' | 'confirmed';
 
 type Props = {
@@ -63,15 +62,35 @@ function formatMoney(value: any): string {
   return `EUR ${n.toFixed(2)}`;
 }
 
-function expectedAmountForReservation(r: Reservation): number | null {
-  const explicit = toNumberSafe(r.total_amount);
-  if (explicit !== null) return explicit;
-
-  const guests = typeof r.guests === 'number' ? r.guests : 0;
+function expectedAmountForReservation(
+  r: Reservation,
+  opts?: {
+    guestsOverride?: number;
+    perHeadOverride?: number | null;
+    minSpendOverride?: number | null;
+    ignoreExplicitTotal?: boolean;
+  },
+): number | null {
+  const guests =
+    typeof opts?.guestsOverride === 'number'
+      ? opts.guestsOverride
+      : typeof r.guests === 'number'
+        ? r.guests
+        : 0;
   if (guests <= 0) return null;
 
-  const perHead = toNumberSafe(r.venue_table?.per_testa);
-  const minSpend = toNumberSafe(r.venue_table?.costo_minimo);
+  const explicit = toNumberSafe(r.total_amount);
+
+  if (!opts?.ignoreExplicitTotal && explicit !== null) return explicit;
+
+  const perHead =
+    opts?.perHeadOverride !== undefined
+      ? opts.perHeadOverride
+      : toNumberSafe(r.venue_table?.per_testa);
+  const minSpend =
+    opts?.minSpendOverride !== undefined
+      ? opts.minSpendOverride
+      : toNumberSafe(r.venue_table?.costo_minimo);
 
   let computed: number | null = null;
   if (perHead !== null) computed = perHead * guests;
@@ -79,6 +98,11 @@ function expectedAmountForReservation(r: Reservation): number | null {
   if (minSpend !== null) {
     if (computed === null) return minSpend;
     return Math.max(computed, minSpend);
+  }
+
+  // Fallback when only explicit total is known: keep per-person ratio for quick edits.
+  if (explicit !== null && r.guests > 0) {
+    return (explicit / r.guests) * guests;
   }
 
   return computed;
@@ -111,6 +135,18 @@ export default function VenueReservationsTab(props: Props) {
   const [query, setQuery] = useState('');
   const [actionReservationId, setActionReservationId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [localReservations, setLocalReservations] = useState<Reservation[]>(
+    props.selectedEventReservations ?? [],
+  );
+  const [tableDrafts, setTableDrafts] = useState<Record<string, string>>({});
+  const [guestsDrafts, setGuestsDrafts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    setLocalReservations(props.selectedEventReservations ?? []);
+    setTableDrafts({});
+    setGuestsDrafts({});
+    setExpandedId(null);
+  }, [props.selectedEventReservations, props.selectedEventId]);
 
   const selected = useMemo(() => {
     if (!props.selectedEventId) return null;
@@ -123,11 +159,36 @@ export default function VenueReservationsTab(props: Props) {
     );
   }, [props.venueEvents]);
 
+  const pricingByVenueTableId = useMemo(() => {
+    const out = new Map<string, { perHead: number | null; minSpend: number | null }>();
+    const rows = Array.isArray(selected?.table_pricing) ? selected.table_pricing : [];
+
+    rows.forEach((row) => {
+      if (!row?.venue_table_id) return;
+      out.set(row.venue_table_id, {
+        perHead: toNumberSafe(row.per_testa),
+        minSpend: toNumberSafe(row.costo_minimo),
+      });
+    });
+
+    return out;
+  }, [selected]);
+
+  const getReservationPricing = (reservation: Reservation) => {
+    const fromEvent = reservation.venue_table_id
+      ? pricingByVenueTableId.get(reservation.venue_table_id)
+      : undefined;
+
+    const perHead = fromEvent?.perHead ?? toNumberSafe(reservation.venue_table?.per_testa);
+    const minSpend = fromEvent?.minSpend ?? toNumberSafe(reservation.venue_table?.costo_minimo);
+    return { perHead, minSpend };
+  };
+
   const tableReservations = useMemo(() => {
-    return (props.selectedEventReservations ?? []).filter(
+    return (localReservations ?? []).filter(
       (r) => r.type === 'table' && (r.status === 'pending' || r.status === 'confirmed'),
     );
-  }, [props.selectedEventReservations]);
+  }, [localReservations]);
 
   const pendingCount = useMemo(
     () => tableReservations.filter((r) => r.status === 'pending').length,
@@ -169,16 +230,49 @@ export default function VenueReservationsTab(props: Props) {
   );
 
   const pendingRevenueVisible = useMemo(
-    () => pendingVisible.reduce((sum, r) => sum + (expectedAmountForReservation(r) ?? 0), 0),
-    [pendingVisible],
+    () =>
+      pendingVisible.reduce((sum, r) => {
+        const pricing = getReservationPricing(r);
+        return (
+          sum +
+          (expectedAmountForReservation(r, {
+            perHeadOverride: pricing.perHead,
+            minSpendOverride: pricing.minSpend,
+          }) ??
+            0)
+        );
+      }, 0),
+    [pendingVisible, pricingByVenueTableId],
   );
 
+  const runBackgroundRefresh = () => {
+    Promise.resolve(props.onRefresh()).catch(() => undefined);
+  };
+
+  const patchLocalReservation = (id: string, patch: Partial<Reservation>) => {
+    setLocalReservations((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
+
+  const mergeServerReservation = (id: string, serverReservation: Reservation | null) => {
+    if (!serverReservation) return;
+    setLocalReservations((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, ...serverReservation } : r)),
+    );
+  };
+
   const confirmReservation = async (id: string) => {
+    const previous = localReservations.find((r) => r.id === id);
+    if (!previous) return;
+
     try {
       setActionReservationId(id);
-      await updateReservation(id, { status: 'confirmed' });
-      await props.onRefresh();
+      patchLocalReservation(id, { status: 'confirmed' });
+
+      const updated = await updateReservation(id, { status: 'confirmed' });
+      mergeServerReservation(id, updated);
+      runBackgroundRefresh();
     } catch (e: any) {
+      patchLocalReservation(id, previous);
       const msg = e?.response?.data?.message || e?.message || 'Impossibile confermare la prenotazione';
       Alert.alert('Errore', String(msg));
     } finally {
@@ -195,20 +289,49 @@ export default function VenueReservationsTab(props: Props) {
       {
         text: 'Conferma tutte',
         onPress: async () => {
+          const previousById = new Map(
+            pendingVisible
+              .filter((r) => ids.includes(r.id))
+              .map((r) => [r.id, r] as const),
+          );
+
           try {
             setActionReservationId('bulk-confirm');
+            setLocalReservations((prev) =>
+              prev.map((r) =>
+                ids.includes(r.id) ? { ...r, status: 'confirmed' } : r,
+              ),
+            );
+
             const settled = await Promise.allSettled(
               ids.map((id) => updateReservation(id, { status: 'confirmed' })),
             );
 
+            const failedIds: string[] = [];
+            settled.forEach((s, index) => {
+              const reservationId = ids[index];
+              if (s.status === 'fulfilled') {
+                mergeServerReservation(reservationId, s.value);
+                return;
+              }
+              failedIds.push(reservationId);
+            });
+
+            if (failedIds.length) {
+              setLocalReservations((prev) =>
+                prev.map((r) => previousById.get(r.id) ?? r),
+              );
+            }
+
             const ok = settled.filter((s) => s.status === 'fulfilled').length;
             const ko = settled.length - ok;
-            await props.onRefresh();
+            runBackgroundRefresh();
 
             if (ko > 0) {
               Alert.alert('Conferma parziale', `Confermate ${ok} richieste, ${ko} non riuscite.`);
             }
           } catch (e: any) {
+            setLocalReservations((prev) => prev.map((r) => previousById.get(r.id) ?? r));
             const msg = e?.response?.data?.message || e?.message || 'Errore nella conferma multipla';
             Alert.alert('Errore', String(msg));
           } finally {
@@ -226,11 +349,17 @@ export default function VenueReservationsTab(props: Props) {
         text: 'Annulla',
         style: 'destructive',
         onPress: async () => {
+          const previous = localReservations.find((r) => r.id === id);
+          if (!previous) return;
+
           try {
             setActionReservationId(id);
-            await cancelReservation(id);
-            await props.onRefresh();
+            patchLocalReservation(id, { status: 'cancelled' });
+            const updated = await cancelReservation(id);
+            mergeServerReservation(id, updated);
+            runBackgroundRefresh();
           } catch (e: any) {
+            patchLocalReservation(id, previous);
             const msg = e?.response?.data?.message || e?.message || 'Impossibile annullare la prenotazione';
             Alert.alert('Errore', String(msg));
           } finally {
@@ -241,15 +370,108 @@ export default function VenueReservationsTab(props: Props) {
     ]);
   };
 
+  const saveQueuedEdits = async (reservation: Reservation) => {
+    const currentGuests = reservation.guests || 1;
+    const draftGuests = Math.max(
+      1,
+      Math.floor(guestsDrafts[reservation.id] ?? currentGuests),
+    );
+    const currentTableName = String(reservation.table_name ?? '').trim();
+    const draftTableName = String(tableDrafts[reservation.id] ?? currentTableName).trim();
+    const nextTableName = draftTableName.length ? draftTableName : null;
+    const pricing = getReservationPricing(reservation);
+    const recalculatedAmount = expectedAmountForReservation(reservation, {
+      guestsOverride: draftGuests,
+      perHeadOverride: pricing.perHead,
+      minSpendOverride: pricing.minSpend,
+      ignoreExplicitTotal: true,
+    });
+    const normalizedRecalculatedAmount =
+      recalculatedAmount === null ? undefined : Number(recalculatedAmount.toFixed(2));
+
+    const payload: { guests?: number; table_name?: string | null; total_amount?: number } = {};
+    if (draftGuests !== currentGuests) payload.guests = draftGuests;
+    if ((nextTableName ?? '') !== currentTableName) payload.table_name = nextTableName;
+    if (draftGuests !== currentGuests && normalizedRecalculatedAmount !== undefined) {
+      payload.total_amount = normalizedRecalculatedAmount;
+    }
+    if (Object.keys(payload).length === 0) return;
+
+    const previousGuests = currentGuests;
+    const previousTableName = reservation.table_name ?? null;
+
+    try {
+      setActionReservationId(reservation.id);
+      patchLocalReservation(reservation.id, {
+        guests: payload.guests ?? currentGuests,
+        table_name: payload.table_name !== undefined ? payload.table_name : previousTableName,
+        total_amount:
+          payload.total_amount !== undefined
+            ? payload.total_amount
+            : reservation.total_amount,
+      });
+
+      const updated = await updateReservation(reservation.id, payload);
+      mergeServerReservation(reservation.id, updated);
+      setGuestsDrafts((prev) => ({
+        ...prev,
+        [reservation.id]: payload.guests ?? currentGuests,
+      }));
+      setTableDrafts((prev) => ({
+        ...prev,
+        [reservation.id]: payload.table_name === undefined
+          ? currentTableName
+          : payload.table_name ?? '',
+      }));
+      runBackgroundRefresh();
+    } catch (e: any) {
+      patchLocalReservation(reservation.id, {
+        guests: previousGuests,
+        table_name: previousTableName,
+      });
+      setGuestsDrafts((prev) => ({
+        ...prev,
+        [reservation.id]: previousGuests,
+      }));
+      setTableDrafts((prev) => ({
+        ...prev,
+        [reservation.id]: String(previousTableName ?? ''),
+      }));
+      const msg = e?.response?.data?.message || e?.message || 'Impossibile salvare le modifiche';
+      Alert.alert('Errore', String(msg));
+    } finally {
+      setActionReservationId(null);
+    }
+  };
+
   const renderQueueCard = (r: Reservation) => {
     const who = guestIdentity(r);
     const zone = reservationZone(r);
     const waitMins = waitingMinutes(r);
     const isLate = r.status === 'pending' && (waitMins ?? 0) >= 45;
-    const amount = expectedAmountForReservation(r);
     const tableLabel = r.venue_table?.numero ? `Tavolo ${r.venue_table.numero}` : 'Da assegnare';
     const customTableName = String(r.table_name ?? '').trim();
+    const currentGuests = r.guests || 1;
+    const draftGuests = Math.max(1, Math.floor(guestsDrafts[r.id] ?? currentGuests));
+    const draftTableRaw = String(tableDrafts[r.id] ?? customTableName);
+    const draftTableName = draftTableRaw.trim();
+    const nextDraftTableName = draftTableName.length ? draftTableName : null;
+    const hasGuestChanges = draftGuests !== currentGuests;
+    const hasTableChanges = (nextDraftTableName ?? '') !== customTableName;
+    const hasUnsavedChanges = hasGuestChanges || hasTableChanges;
     const expanded = expandedId === r.id;
+    const pricing = getReservationPricing(r);
+    const amount = expectedAmountForReservation(r, {
+      perHeadOverride: pricing.perHead,
+      minSpendOverride: pricing.minSpend,
+    });
+    const liveDraftAmount = expectedAmountForReservation(r, {
+      guestsOverride: draftGuests,
+      perHeadOverride: pricing.perHead,
+      minSpendOverride: pricing.minSpend,
+      ignoreExplicitTotal: true,
+    });
+    const amountToShow = expanded ? liveDraftAmount ?? amount : amount;
     const isBusy = actionReservationId === r.id || actionReservationId === 'bulk-confirm';
 
     const cardBorderColor =
@@ -275,7 +497,22 @@ export default function VenueReservationsTab(props: Props) {
         <TouchableOpacity
           activeOpacity={0.9}
           style={styles.queueMainRow}
-          onPress={() => setExpandedId((prev) => (prev === r.id ? null : r.id))}
+          onPress={() =>
+            setExpandedId((prev) => {
+              const next = prev === r.id ? null : r.id;
+              if (next === r.id) {
+                setTableDrafts((drafts) => ({
+                  ...drafts,
+                  [r.id]: customTableName,
+                }));
+                setGuestsDrafts((drafts) => ({
+                  ...drafts,
+                  [r.id]: currentGuests,
+                }));
+              }
+              return next;
+            })
+          }
         >
           <View style={styles.infoCol}>
             <View style={styles.nameRow}>
@@ -284,7 +521,9 @@ export default function VenueReservationsTab(props: Props) {
               </Text>
               <View style={[styles.guestBadge, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
                 <Feather name="users" size={10} color={theme.colors.muted} />
-                <Text style={[styles.guestBadgeText, { color: theme.colors.text }]}>{r.guests || 0}</Text>
+                <Text style={[styles.guestBadgeText, { color: theme.colors.text }]}>
+                  {expanded ? draftGuests : r.guests || 0}
+                </Text>
               </View>
               {isLate ? (
                 <View style={styles.latePill}>
@@ -299,13 +538,13 @@ export default function VenueReservationsTab(props: Props) {
               </Text>
               <View style={[styles.dot, { backgroundColor: theme.colors.border }]} />
               <Text style={styles.moneyText} numberOfLines={1}>
-                {formatMoney(amount)} EST
+                {formatMoney(amountToShow)} EST
               </Text>
             </View>
 
             <View style={styles.metaRowSecondary}>
               <Text style={[styles.secondaryMetaText, { color: theme.colors.muted }]} numberOfLines={1}>
-                {tableLabel}
+                {customTableName || tableLabel}
               </Text>
               {waitMins !== null ? (
                 <Text style={[styles.secondaryMetaText, { color: isLate ? '#ef4444' : theme.colors.muted }]}>
@@ -351,7 +590,7 @@ export default function VenueReservationsTab(props: Props) {
 
               <View style={styles.expandedCell}>
                 <Text style={[styles.expandedLabel, { color: theme.colors.muted }]}>Spesa attuale</Text>
-                <Text style={[styles.expandedValue, { color: theme.colors.text }]}>{formatMoney(0)}</Text>
+                <Text style={[styles.expandedValue, { color: theme.colors.text }]}>{formatMoney(amountToShow)}</Text>
               </View>
 
               <View style={styles.expandedCell}>
@@ -359,6 +598,123 @@ export default function VenueReservationsTab(props: Props) {
                 <Text style={[styles.expandedValue, { color: theme.colors.text }]} numberOfLines={1}>
                   {customTableName || tableLabel}
                 </Text>
+              </View>
+            </View>
+
+            <View style={[styles.quickActionsPanel, { borderColor: theme.colors.border, backgroundColor: 'rgba(255,255,255,0.02)' }]}>
+              <Text style={[styles.quickActionsTitle, { color: theme.colors.text }]}>Modifiche last-minute</Text>
+
+              <View style={styles.quickGuestsRow}>
+                <Text style={[styles.quickLabel, { color: theme.colors.muted }]}>Ospiti</Text>
+                <View style={styles.quickStepperWrap}>
+                  <TouchableOpacity
+                    onPress={() =>
+                      setGuestsDrafts((prev) => ({
+                        ...prev,
+                        [r.id]: Math.max(1, draftGuests - 1),
+                      }))
+                    }
+                    disabled={isBusy || draftGuests <= 1}
+                    style={[
+                      styles.quickStepperBtn,
+                      {
+                        borderColor: theme.colors.border,
+                        backgroundColor: theme.colors.card,
+                        opacity: isBusy || draftGuests <= 1 ? 0.5 : 1,
+                      },
+                    ]}
+                  >
+                    <Feather name="minus" size={14} color={theme.colors.text} />
+                  </TouchableOpacity>
+
+                  <Text style={[styles.quickGuestsValue, { color: theme.colors.text }]}>{draftGuests}</Text>
+
+                  <TouchableOpacity
+                    onPress={() =>
+                      setGuestsDrafts((prev) => ({
+                        ...prev,
+                        [r.id]: draftGuests + 1,
+                      }))
+                    }
+                    disabled={isBusy}
+                    style={[
+                      styles.quickStepperBtn,
+                      {
+                        borderColor: theme.colors.border,
+                        backgroundColor: theme.colors.card,
+                        opacity: isBusy ? 0.5 : 1,
+                      },
+                    ]}
+                  >
+                    <Feather name="plus" size={14} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.quickTableRow}>
+                <Text style={[styles.quickLabel, { color: theme.colors.muted }]}>Nome tavolo</Text>
+                <View style={[styles.quickTableInputWrap, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
+                  <Feather name="edit-3" size={14} color={theme.colors.muted} />
+                  <TextInput
+                    value={draftTableRaw}
+                    onChangeText={(value) =>
+                      setTableDrafts((prev) => ({
+                        ...prev,
+                        [r.id]: value,
+                      }))
+                    }
+                    editable={!isBusy}
+                    placeholder="Es. Privé 3"
+                    placeholderTextColor={theme.colors.muted}
+                    style={[styles.quickTableInput, { color: theme.colors.text }]}
+                    autoCorrect={false}
+                    returnKeyType="done"
+                  />
+                </View>
+              </View>
+
+              {hasUnsavedChanges ? (
+                <Text style={[styles.quickUnsavedText, { color: '#f0d785' }]}>Modifiche non salvate</Text>
+              ) : (
+                <Text style={[styles.quickSavedText, { color: theme.colors.muted }]}>Nessuna modifica in sospeso</Text>
+              )}
+
+              <View style={styles.quickTableActions}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setGuestsDrafts((prev) => ({
+                      ...prev,
+                      [r.id]: currentGuests,
+                    }));
+                    setTableDrafts((prev) => ({
+                      ...prev,
+                      [r.id]: customTableName,
+                    }));
+                  }}
+                  disabled={isBusy}
+                  style={[
+                    styles.quickGhostBtn,
+                    { borderColor: theme.colors.border, backgroundColor: theme.colors.card, opacity: isBusy ? 0.6 : 1 },
+                  ]}
+                >
+                  <Text style={[styles.quickGhostBtnText, { color: theme.colors.text }]}>Reset</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => saveQueuedEdits(r)}
+                  disabled={isBusy || !hasUnsavedChanges}
+                  style={[
+                    styles.quickPrimaryBtn,
+                    { backgroundColor: '#d4b24f', opacity: isBusy || !hasUnsavedChanges ? 0.65 : 1 },
+                  ]}
+                >
+                  {isBusy ? (
+                    <ActivityIndicator size="small" color="#151515" />
+                  ) : (
+                    <Feather name="save" size={14} color="#151515" />
+                  )}
+                  <Text style={styles.quickPrimaryBtnText}>Salva modifiche</Text>
+                </TouchableOpacity>
               </View>
             </View>
           </View>
@@ -443,8 +799,8 @@ export default function VenueReservationsTab(props: Props) {
 
           <Text style={[styles.segmentHint, { color: theme.colors.muted }]}>
             {statusFilter === 'pending'
-              ? 'Richieste da gestire: conferma o rifiuta ogni prenotazione.'
-              : 'Prenotazioni gia confermate per questo evento.'}
+              ? 'Richieste da gestire: apri una card per modifiche rapide su ospiti e tavolo.'
+              : 'Prenotazioni confermate: puoi ancora aggiornare tavolo e numero ospiti.'}
           </Text>
         </View>
 
@@ -504,11 +860,29 @@ export default function VenueReservationsTab(props: Props) {
           </View>
 
           <TouchableOpacity
-            style={[styles.filterBtn, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}
+            style={[
+              styles.quickAddBtn,
+              {
+                borderColor: theme.colors.border,
+                backgroundColor: props.selectedEventId ? '#d4b24f' : theme.colors.card,
+              },
+            ]}
             onPress={props.onOpenCreateReservation}
             disabled={!props.selectedEventId}
           >
-            <Feather name="plus" size={18} color={props.selectedEventId ? theme.colors.text : theme.colors.muted} />
+            <Feather
+              name="plus"
+              size={16}
+              color={props.selectedEventId ? '#151515' : theme.colors.muted}
+            />
+            <Text
+              style={[
+                styles.quickAddText,
+                { color: props.selectedEventId ? '#151515' : theme.colors.muted },
+              ]}
+            >
+              Nuova
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -713,13 +1087,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  filterBtn: {
-    width: 44,
+  quickAddBtn: {
+    minWidth: 96,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+  quickAddText: {
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
   },
   bulkCard: {
     marginTop: 12,
@@ -906,6 +1289,107 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     fontWeight: '700',
+  },
+  quickActionsPanel: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    gap: 10,
+  },
+  quickActionsTitle: {
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.9,
+  },
+  quickGuestsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  quickLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  quickStepperWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quickStepperBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickGuestsValue: {
+    minWidth: 26,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  quickTableRow: {
+    gap: 6,
+  },
+  quickUnsavedText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  quickSavedText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  quickTableInputWrap: {
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quickTableInput: {
+    flex: 1,
+    paddingVertical: 8,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  quickTableActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickGhostBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+  },
+  quickGhostBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  quickPrimaryBtn: {
+    flex: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  quickPrimaryBtnText: {
+    color: '#151515',
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
   },
   emptyBlock: {
     paddingHorizontal: 16,

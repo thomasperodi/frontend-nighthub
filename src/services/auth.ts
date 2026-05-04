@@ -27,9 +27,22 @@ export async function setOnboardingSeen(seen: boolean = true): Promise<void> {
   await SecureStore.setItemAsync(ONBOARDING_SEEN_KEY, seen ? '1' : '0');
 }
 
-export async function login(email: string, password: string) {
-  const res = await api.post('/auth/login', { email, password });
+export async function login(identifier: string, password: string) {
+  const res = await api.post('/auth/login', { identifier, password });
   return res.data; // { access_token, user }
+}
+
+export async function requestPasswordReset(identifier: string) {
+  const res = await api.post('/auth/forgot-password', { identifier });
+  return res.data;
+}
+
+export async function resetPassword(token: string, newPassword: string) {
+  const res = await api.post('/auth/reset-password', {
+    token,
+    new_password: newPassword,
+  });
+  return res.data;
 }
 
 export async function register(payload: RegisterPayload) {

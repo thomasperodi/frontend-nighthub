@@ -22,13 +22,18 @@ import PrimaryButton from "../../components/PrimaryButton";
 export default function LoginScreen({ navigation }: any) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [secure, setSecure] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const canSubmit = /^\S+@\S+\.\S+$/.test(email.trim()) && password.length >= 6;
+  const normalizedIdentifier = identifier.trim();
+  const isEmailIdentifier = normalizedIdentifier.includes("@");
+  const canSubmit =
+    (isEmailIdentifier
+      ? /^\S+@\S+\.\S+$/.test(normalizedIdentifier)
+      : normalizedIdentifier.length >= 3) && password.length >= 6;
 
   const passwordRef = useRef<TextInput>(null);
 
@@ -44,8 +49,14 @@ export default function LoginScreen({ navigation }: any) {
 
   const validate = () => {
     setError(null);
-    const emailRegex = /^\S+@\S+\.\S+$/;
-    if (!emailRegex.test(email)) return "Inserisci un'email valida";
+    const value = identifier.trim();
+    if (!value) return "Inserisci email o username";
+    if (value.includes("@") && !/^\S+@\S+\.\S+$/.test(value)) {
+      return "Inserisci un'email valida";
+    }
+    if (!value.includes("@") && value.length < 3) {
+      return "Username minimo 3 caratteri";
+    }
     if (password.length < 6) return "La password deve contenere almeno 6 caratteri";
     return null;
   };
@@ -63,7 +74,7 @@ export default function LoginScreen({ navigation }: any) {
     setError(null);
 
     try {
-      await signIn(email, password);
+      await signIn(identifier.trim(), password);
       // Navigation will switch via AuthProvider / RootNavigation
     } catch (e: any) {
       console.error(e);
@@ -111,24 +122,24 @@ export default function LoginScreen({ navigation }: any) {
 
                 <View style={styles.labelRow}>
                   <Feather name="mail" size={14} color={theme.colors.muted} />
-                  <Text style={[styles.label, { color: theme.colors.muted }]}>Email</Text>
+                  <Text style={[styles.label, { color: theme.colors.muted }]}>Email o username</Text>
                 </View>
                 <TextInput
-                  placeholder="nome@esempio.com"
+                  placeholder="nome@esempio.com o username"
                   placeholderTextColor={theme.colors.muted}
-                  keyboardType="email-address"
+                  keyboardType="default"
                   autoCapitalize="none"
                   autoCorrect={false}
-                  autoComplete="email"
-                  textContentType="emailAddress"
-                  value={email}
-                  onChangeText={setEmail}
+                  autoComplete="username"
+                  textContentType="username"
+                  value={identifier}
+                  onChangeText={setIdentifier}
                   style={[styles.input, { backgroundColor: theme.colors.card, color: theme.colors.text, borderColor: theme.colors.border }]}
                   returnKeyType="next"
                   blurOnSubmit={false}
                   onSubmitEditing={() => passwordRef.current?.focus()}
                   accessible
-                  accessibilityLabel="Email"
+                  accessibilityLabel="Email o username"
                 />
 
                 <View style={[styles.labelRow, styles.secondaryLabelRow]}>
@@ -161,6 +172,16 @@ export default function LoginScreen({ navigation }: any) {
                     accessible
                     accessibilityLabel="Password"
                   />
+                </View>
+
+                <View style={styles.forgotRow}>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate("ForgotPassword", { prefill: identifier.trim() })}
+                    accessibilityRole="button"
+                    accessibilityLabel="Password dimenticata"
+                  >
+                    <Text style={[styles.forgotText, { color: theme.colors.primary }]}>Password dimenticata?</Text>
+                  </TouchableOpacity>
                 </View>
 
                 <PrimaryButton
@@ -246,7 +267,15 @@ const styles = StyleSheet.create({
   },
   passwordWrapper: {
     position: "relative",
-    marginBottom: 12,
+    marginBottom: 4,
+  },
+  forgotRow: {
+    alignItems: "flex-end",
+    marginBottom: 14,
+  },
+  forgotText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   iconAbove: {
     position: "absolute",

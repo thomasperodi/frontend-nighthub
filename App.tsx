@@ -26,6 +26,9 @@ const linking: LinkingOptions<any> = {
   ],
   config: {
     screens: {
+      ForgotPassword: {
+        path: "reset-password",
+      },
       EventDetail: "event/:id",
     },
   },

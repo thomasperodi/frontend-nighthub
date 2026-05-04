@@ -5,6 +5,7 @@ import { useAuth } from '../providers/AuthProvider';
 import { getOnboardingSeen } from '../services/auth';
 
 import LoginScreen from '../screens/auth/LoginScreen';
+import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import OnboardingScreen from '../screens/onboarding/OnboardingScreen';
 
 import VenueStack from './stacks/VenueStack';
@@ -56,6 +57,7 @@ export default function RootNavigator() {
       >
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
         <Stack.Screen name="Register" component={RegisterScreen} />
       </Stack.Navigator>
     );
